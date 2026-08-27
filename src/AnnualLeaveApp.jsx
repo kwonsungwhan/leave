@@ -351,9 +351,13 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
 
 const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     const { companyName } = useContext(AppContext);
-    if (!allEmployees) return null;
+    
+    // 이전에 발생한 에러 원인: Hook(useState)을 if문 아래에 두어서 발생했습니다. 
+    // 정상 작동을 위해 무조건 if문 위로 끌어올렸습니다.
     const [selectedEmp, setSelectedEmp] = useState(null);
     const [docType, setDocType] = useState('촉구서');
+
+    if (!allEmployees) return null;
 
     const calculateStatus = (emp) => {
         const myRecords = records.filter(r => r.empId === emp.empId);

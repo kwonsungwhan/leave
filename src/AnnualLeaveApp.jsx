@@ -88,6 +88,7 @@ export default function AnnualLeaveApp() {
     const [companyName, setCompanyName] = useState('우리회사');
     const [toastMsg, setToastMsg] = useState({ text: '', type: '' });
     const [confirmState, setConfirmState] = useState({ open: false, message: '', onConfirm: null });
+    const [hasCleanedUp, setHasCleanedUp] = useState(false);
 
     const publicPath = `leave-app/data`;
 
@@ -151,7 +152,7 @@ export default function AnnualLeaveApp() {
 
     useEffect(() => {
         const syncAutoLeave = async () => {
-            if (!isReady || !auth.currentUser || employees.length === 0) return;
+            if (!isReady || employees.length === 0) return;
             const today = new Date();
             const expected = [];
             
@@ -159,40 +160,83 @@ export default function AnnualLeaveApp() {
                 if (!emp.joinDate) return;
                 const joinDateStr = emp.joinDate;
                 
+                // 1년 미만 매월 1개씩 발생
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     if (today >= new Date(targetDateStr)) {
-                        expected.push({ date: targetDateStr, type: '발생', days: 1, remark: `입사 ${m}개월 만근 연차 (자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+                        expected.push({ date: targetDateStr, type: '발생', days: 1, remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
                     }
                 }
+
+                // 1년 이상 연차 발생 로직
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
-                const years = (today - new Date(jy, jm - 1, jd)) / (1000 * 60 * 60 * 24 * 365);
+                const joinD = new Date(jy, jm - 1, jd);
+                const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
+                
                 if (years >= 1) {
                     for (let y = 1; y <= Math.floor(years); y++) {
                         const targetDateStr = addYearsExact(joinDateStr, y);
                         if (today >= new Date(targetDateStr)) {
                             let base = 15;
-                            if (y >= 3) base += Math.floor((y - 1) / 2);
-                            base = Math.min(base, 25);
-                            expected.push({ date: targetDateStr, type: '발생', days: base, remark: `입사 ${y}년차 연차 (자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+                            if (y >= 3) base += Math.floor((y - 1) / 2); // 3년차부터 매 2년마다 1일씩 가산
+                            base = Math.min(base, 25); // 최대 25일
+                            expected.push({ date: targetDateStr, type: '발생', days: base, remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
                         }
                     }
                 }
             });
 
-            for (const ex of expected) {
-                const exists = leaveRecords.find(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
-                if (!exists) {
-                    const newId = `auto-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-                    const empInfo = employees.find(e => e.empId === ex.empId);
-                    await setDoc(doc(db, publicPath, 'leaveRecords', newId), {
-                        ...ex, dept: empInfo?.dept, name: empInfo?.name, realName: empInfo?.realName, isCanceled: false
-                    });
+            // 계산된 자동 발생 내역 중 DB에 없는 것만 추가
+            if (expected.length > 0) {
+                for (const ex of expected) {
+                    const exists = leaveRecords.find(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
+                    if (!exists) {
+                        const newId = `auto-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                        const emp = employees.find(e => e.empId === ex.empId);
+                        if (emp) {
+                            try {
+                                await setDoc(doc(db, publicPath, 'leaveRecords', newId), { ...ex, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false });
+                            } catch (e) {
+                                console.error("자동 발생 에러", e);
+                            }
+                        }
+                    }
                 }
             }
         };
+        
         syncAutoLeave();
-    }, [isReady, employees]);
+    }, [isReady, employees, leaveRecords]);
+
+    useEffect(() => {
+        if (!isReady || leaveRecords.length === 0 || hasCleanedUp) return;
+
+        const cleanupOldRecords = async () => {
+            const fourYearsAgo = new Date();
+            fourYearsAgo.setFullYear(fourYearsAgo.getFullYear() - 4); // 오늘 기준 정확히 4년 전
+
+            // 4년 전 날짜보다 더 과거인 기록들 필터링
+            const recordsToDelete = leaveRecords.filter(record => {
+                if (!record.date) return false;
+                const recordDate = new Date(record.date);
+                return recordDate < fourYearsAgo; 
+            });
+
+            if (recordsToDelete.length > 0) {
+                console.log(`4년 경과 데이터 ${recordsToDelete.length}건 자동 삭제 진행 중...`);
+                for (const record of recordsToDelete) {
+                    try {
+                        await deleteDoc(doc(db, publicPath, 'leaveRecords', record.id));
+                    } catch (err) {
+                        console.error("오래된 데이터 삭제 중 에러:", err);
+                    }
+                }
+            }
+            setHasCleanedUp(true); // 접속 중 1회만 체크
+        };
+
+        cleanupOldRecords();
+    }, [isReady, leaveRecords, hasCleanedUp]);
 
     const dbUpdateSettings = async (key, value) => {
         await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });

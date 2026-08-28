@@ -3,8 +3,6 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
 
-// 🚨 중요: 아래 내용 중 "여기에_입력" 부분을 지우고 본인의 진짜 열쇠 값으로 덮어쓰세요!
-// (쌍따옴표 " " 와 끝에 있는 쉼표 , 는 지워지지 않게 주의해 주세요)
 const firebaseConfig = {
   apiKey: "AIzaSyCMD3R63avtYeb4o7IfOVUoZq_5iT-_QB0",
   authDomain: "leave-app-289a4.firebaseapp.com",
@@ -102,11 +100,6 @@ export default function AnnualLeaveApp() {
     };
 
     useEffect(() => {
-        if (firebaseConfig.apiKey === "여기에_API_KEY_입력" || firebaseConfig.apiKey.includes("여기에")) {
-            setHasConfigError(true);
-            return;
-        }
-
         const initFirebase = async () => {
             try {
                 await signInAnonymously(auth);
@@ -160,15 +153,18 @@ export default function AnnualLeaveApp() {
                 if (!emp.joinDate) return;
                 const joinDateStr = emp.joinDate;
                 
-                // 1년 미만 매월 1개씩 발생
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     if (today >= new Date(targetDateStr)) {
-                        expected.push({ date: targetDateStr, type: '발생', days: 1, remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+                        expected.push({ 
+                            id: `auto-${emp.empId}-${targetDateStr}`, 
+                            date: targetDateStr, type: '발생', days: 1, 
+                            remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, 
+                            isAuto: true, isFulfilled: true, empId: emp.empId 
+                        });
                     }
                 }
 
-                // 1년 이상 연차 발생 로직
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
@@ -178,24 +174,27 @@ export default function AnnualLeaveApp() {
                         const targetDateStr = addYearsExact(joinDateStr, y);
                         if (today >= new Date(targetDateStr)) {
                             let base = 15;
-                            if (y >= 3) base += Math.floor((y - 1) / 2); // 3년차부터 매 2년마다 1일씩 가산
-                            base = Math.min(base, 25); // 최대 25일
-                            expected.push({ date: targetDateStr, type: '발생', days: base, remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+                            if (y >= 3) base += Math.floor((y - 1) / 2);
+                            base = Math.min(base, 25);
+                            expected.push({ 
+                                id: `auto-${emp.empId}-${targetDateStr}`, 
+                                date: targetDateStr, type: '발생', days: base, 
+                                remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, 
+                                isAuto: true, isFulfilled: true, empId: emp.empId 
+                            });
                         }
                     }
                 }
             });
 
-            // 계산된 자동 발생 내역 중 DB에 없는 것만 추가
             if (expected.length > 0) {
                 for (const ex of expected) {
-                    const exists = leaveRecords.find(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
-                    if (!exists) {
-                        const newId = `auto-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                    const existingRecords = leaveRecords.filter(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
+                    if (existingRecords.length === 0) {
                         const emp = employees.find(e => e.empId === ex.empId);
                         if (emp) {
                             try {
-                                await setDoc(doc(db, publicPath, 'leaveRecords', newId), { ...ex, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false });
+                                await setDoc(doc(db, publicPath, 'leaveRecords', ex.id), { ...ex, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false });
                             } catch (e) {
                                 console.error("자동 발생 에러", e);
                             }
@@ -211,31 +210,55 @@ export default function AnnualLeaveApp() {
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0 || hasCleanedUp) return;
 
-        const cleanupOldRecords = async () => {
-            const fourYearsAgo = new Date();
-            fourYearsAgo.setFullYear(fourYearsAgo.getFullYear() - 4); // 오늘 기준 정확히 4년 전
+        const performMaintenance = async () => {
+            let didCleanup = false;
 
-            // 4년 전 날짜보다 더 과거인 기록들 필터링
-            const recordsToDelete = leaveRecords.filter(record => {
-                if (!record.date) return false;
-                const recordDate = new Date(record.date);
-                return recordDate < fourYearsAgo; 
+            // 1. 중복 데이터 자동 청소
+            const autoRecords = leaveRecords.filter(r => r.isAuto && r.type === '발생');
+            const grouped = {};
+            autoRecords.forEach(r => {
+                const key = `${r.empId}_${r.date}`;
+                if (!grouped[key]) grouped[key] = [];
+                grouped[key].push(r);
             });
 
-            if (recordsToDelete.length > 0) {
-                console.log(`4년 경과 데이터 ${recordsToDelete.length}건 자동 삭제 진행 중...`);
-                for (const record of recordsToDelete) {
-                    try {
-                        await deleteDoc(doc(db, publicPath, 'leaveRecords', record.id));
-                    } catch (err) {
-                        console.error("오래된 데이터 삭제 중 에러:", err);
+            for (const key in grouped) {
+                const records = grouped[key];
+                if (records.length > 1) {
+                    for (let i = 1; i < records.length; i++) {
+                        try {
+                            await deleteDoc(doc(db, publicPath, 'leaveRecords', records[i].id));
+                            didCleanup = true;
+                        } catch(e) { console.error("중복 청소 에러:", e); }
                     }
                 }
             }
-            setHasCleanedUp(true); // 접속 중 1회만 체크
+
+            // 2. 4년(약 1460일) 경과된 과거 데이터 영구 삭제
+            const fourYearsAgo = new Date();
+            fourYearsAgo.setFullYear(fourYearsAgo.getFullYear() - 4); 
+
+            const recordsToDelete = leaveRecords.filter(record => {
+                if (!record.date) return false;
+                return new Date(record.date) < fourYearsAgo; 
+            });
+
+            if (recordsToDelete.length > 0) {
+                for (const record of recordsToDelete) {
+                    try {
+                        await deleteDoc(doc(db, publicPath, 'leaveRecords', record.id));
+                        didCleanup = true;
+                    } catch (err) {
+                        console.error("4년 경과 데이터 삭제 에러:", err);
+                    }
+                }
+            }
+            
+            setHasCleanedUp(true);
+            if (didCleanup) showToast('시스템 자동 유지보수(중복 및 4년 경과 데이터 정리)가 완료되었습니다.', 'success');
         };
 
-        cleanupOldRecords();
+        performMaintenance();
     }, [isReady, leaveRecords, hasCleanedUp]);
 
     const dbUpdateSettings = async (key, value) => {
@@ -251,15 +274,8 @@ export default function AnnualLeaveApp() {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
                 <div className="bg-white p-8 rounded-xl shadow-xl w-full max-w-md text-center border-t-4 border-red-500">
-                    <h2 className="text-xl font-black text-slate-800 mb-2">Firebase 설정 필요 🔑</h2>
-                    <p className="text-slate-600 mb-6 text-sm leading-relaxed">
-                        현재 코드에 <b>가짜 열쇠(안내 문구)</b>가 들어있어<br/>데이터베이스에 접속하지 못하고 있습니다.
-                    </p>
-                    <div className="bg-slate-100 p-4 rounded text-sm text-left text-slate-700 font-bold mb-4 break-words">
-                        우측 코드 에디터의 10~17번째 줄을 보시면<br/>
-                        <span className="text-red-500">"여기에_API_KEY_입력"</span> 등의 글씨가 있습니다.<br/><br/>
-                        이 부분을 Firebase에서 발급받은 <br/>진짜 열쇠 값으로 교체해 주세요!
-                    </div>
+                    <h2 className="text-xl font-black text-slate-800 mb-2">Firebase 설정 오류</h2>
+                    <p className="text-slate-600 mb-6 text-sm leading-relaxed">키 값이 올바르지 않습니다.</p>
                 </div>
             </div>
         );
@@ -456,7 +472,6 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
 
 const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     const { companyName } = useContext(AppContext);
-    
     const [selectedEmp, setSelectedEmp] = useState(null);
     const [docType, setDocType] = useState('촉구서');
 
@@ -890,18 +905,26 @@ function AdminView() {
                                             <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type==='발생'?'bg-blue-50 text-blue-600':'bg-orange-50 text-orange-600'}`}>{r.type}</span>{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-2"></div>}</td>
                                             <td className={`p-3 font-bold ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':(r.type==='사용'?'text-orange-600':'text-indigo-600')}`}>{r.isCanceled?0:(r.type==='사용'?'-':'')+r.days}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
                                             <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
-                                            <td className="p-3 text-center space-x-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
-                                                {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold mb-1 w-full hover:bg-indigo-200">신청서</button>}
+                                            <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
+                                                {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
                                                 {!r.isCanceled && (
                                                     <button onClick={()=>{
-                                                        showConfirm('삭제(취소선) 처리하시겠습니까?', async () => {
+                                                        showConfirm('삭제(취소선) 처리하시겠습니까?\n(기록은 남겨둠)', async () => {
                                                             try {
-                                                                await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자 삭제]` });
+                                                                await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자 취소]` });
                                                                 showToast('취소선 처리됨');
                                                             } catch(err) { showToast('오류 발생', 'error'); }
                                                         });
-                                                    }} className="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded border border-red-200 font-bold w-full hover:bg-red-100">개별삭제</button>
+                                                    }} className="block w-full text-xs bg-orange-50 text-orange-600 px-2 py-1.5 rounded border border-orange-200 font-bold hover:bg-orange-100">취소(선긋기)</button>
                                                 )}
+                                                <button onClick={()=>{
+                                                    showConfirm('이 기록을 데이터베이스에서 완전히 삭제하시겠습니까?\n(경고: 절대 복구할 수 없습니다!)', async () => {
+                                                        try {
+                                                            await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
+                                                            showToast('영구 삭제되었습니다.');
+                                                        } catch(err) { showToast('삭제 오류', 'error'); }
+                                                    });
+                                                }} className="block w-full text-xs bg-red-100 text-red-700 px-2 py-1.5 rounded border border-red-300 font-bold hover:bg-red-200">영구 삭제</button>
                                             </td>
                                         </tr>
                                     ))}

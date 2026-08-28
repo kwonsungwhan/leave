@@ -85,7 +85,6 @@ export default function AnnualLeaveApp() {
     const [companyName, setCompanyName] = useState('우리회사');
     const [toastMsg, setToastMsg] = useState({ text: '', type: '' });
     const [confirmState, setConfirmState] = useState({ open: false, message: '', onConfirm: null });
-    const [hasCleanedUp, setHasCleanedUp] = useState(false);
 
     const publicPath = `leave-app/data`;
 
@@ -142,58 +141,72 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
+    // 🕒 매일 24시(자정) 정각에 4년 전 데이터를 모두 영구 삭제하는 백그라운드 타이머
     useEffect(() => {
-        if (!isReady || leaveRecords.length === 0 || hasCleanedUp) return;
+        if (!isReady) return;
 
-        const performMaintenance = async () => {
-            let didCleanup = false;
-            const fourYearsAgo = new Date();
-            fourYearsAgo.setFullYear(fourYearsAgo.getFullYear() - 4); 
+        const checkAndPurgeFourYearOldData = async () => {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const cutoffYear = currentYear - 4; // 4년 전 연도 (예: 2026년이면 2022년)
 
-            const recordsToDelete = leaveRecords.filter(record => {
-                if (!record.date) return false;
-                return new Date(record.date) < fourYearsAgo; 
-            });
-
-            if (recordsToDelete.length > 0) {
-                for (const record of recordsToDelete) {
-                    try {
-                        await deleteDoc(doc(db, publicPath, 'leaveRecords', record.id));
-                        didCleanup = true;
-                    } catch (err) {
-                        console.error("4년 경과 데이터 자동 삭제 에러:", err);
+            try {
+                // leaveRecords 목록을 기준으로 4년 이상 지난 데이터 색출
+                const snapshotDocs = leaveRecords;
+                for (const rec of snapshotDocs) {
+                    if (!rec.date) continue;
+                    const recYear = parseInt(rec.date.split('-')[0], 10);
+                    if (recYear <= cutoffYear) {
+                        await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
                     }
                 }
+            } catch (err) {
+                console.error("24시 자동 청소 에러:", err);
             }
-            
-            setHasCleanedUp(true);
-            if (didCleanup) showToast('4년 경과 데이터 자동 정리가 완료되었습니다.', 'success');
         };
 
-        performMaintenance();
-    }, [isReady, leaveRecords, hasCleanedUp]);
+        // 앱이 켜질 때 즉시 1회 검사 후 실행
+        checkAndPurgeFourYearOldData();
+
+        // 매일 24시(자정) 정각에 작동하도록 타이머 계산
+        const scheduleMidnightCheck = () => {
+            const now = new Date();
+            const millisTillMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0) - now;
+            
+            return setTimeout(() => {
+                checkAndPurgeFourYearOldData();
+                scheduleMidnightCheck(); // 다음날 자정을 위해 재귀 호출
+            }, millisTillMidnight);
+        };
+
+        const timerId = scheduleMidnightCheck();
+        return () => clearTimeout(timerId);
+    }, [isReady, leaveRecords]);
 
     useEffect(() => {
         const syncAutoLeave = async () => {
             if (!isReady || employees.length === 0) return;
             const today = new Date();
-            const expectedMap = new Map();
             
-            employees.forEach(emp => {
-                if (!emp.joinDate) return;
+            for (const emp of employees) {
+                if (!emp.joinDate) continue;
                 const joinDateStr = emp.joinDate;
                 
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     if (today >= new Date(targetDateStr)) {
                         const uniqueId = `auto-${emp.empId}-${targetDateStr}`;
-                        expectedMap.set(uniqueId, { 
-                            id: uniqueId, 
+                        const recordData = { 
                             date: targetDateStr, type: '발생', days: 1, 
                             remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, 
                             isAuto: true, isFulfilled: true, empId: emp.empId,
                             dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
-                        });
+                        };
+                        try {
+                            await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), recordData, { merge: true });
+                        } catch (e) {
+                            console.error("자동 발생 에러", e);
+                        }
                     }
                 }
 
@@ -209,23 +222,19 @@ export default function AnnualLeaveApp() {
                             if (y >= 3) base += Math.floor((y - 1) / 2);
                             base = Math.min(base, 25);
                             const uniqueId = `auto-${emp.empId}-${targetDateStr}`;
-                            expectedMap.set(uniqueId, { 
-                                id: uniqueId, 
+                            const recordData = { 
                                 date: targetDateStr, type: '발생', days: base, 
                                 remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, 
                                 isAuto: true, isFulfilled: true, empId: emp.empId,
                                 dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
-                            });
+                            };
+                            try {
+                                await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), recordData, { merge: true });
+                            } catch (e) {
+                                console.error("자동 발생 에러", e);
+                            }
                         }
                     }
-                }
-            });
-
-            for (const [id, ex] of expectedMap.entries()) {
-                try {
-                    await setDoc(doc(db, publicPath, 'leaveRecords', id), ex, { merge: true });
-                } catch (e) {
-                    console.error("자동 발생 에러", e);
                 }
             }
         };
@@ -347,9 +356,10 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         <button onClick={onClose} className="text-slate-500 p-2 hover:bg-slate-200 rounded"><Icons.X /></button>
                     </div>
                 </div>
-                <div className="p-8 overflow-auto bg-white print:p-0" id="print-area">
+                {/* 엄격한 A4 규격 레이아웃 */}
+                <div className="p-12 overflow-auto bg-white print:p-[20mm] print:w-[210mm] print:h-[297mm] print:mx-auto print:box-border" id="print-area">
                     <h1 className="text-3xl font-black text-center mb-8 tracking-widest decoration-4 underline underline-offset-8">휴가 신청서</h1>
-                    <div className="flex justify-between items-end mb-4">
+                    <div className="flex justify-between items-end mb-6">
                         <div className="text-sm">문서번호: AL-{record.date.replace(/-/g, '')}-{record.id.substring(record.id.length-4).toUpperCase()}<br/>출력일자: {new Date().toLocaleDateString()}</div>
                         <table className="border-collapse text-center text-sm border-2 border-black">
                             <tbody>
@@ -374,7 +384,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                     </table>
                     <div className="text-center text-lg mb-16">위와 같이 휴가를 신청하오니 허가하여 주시기 바랍니다.</div>
                     <div className="text-center mb-8 text-lg font-bold">{new Date(record.date).toLocaleDateString()}</div>
-                    <div className="flex justify-end items-end text-lg pr-12 mt-12">
+                    <div className="flex justify-end items-end text-lg pr-12 mt-16">
                         <span className="mr-4">신청자 :</span>
                         <div className="w-48 border-b-2 border-black border-dotted h-6 mr-2"></div>
                         <span>(서명/인)</span>
@@ -383,16 +393,16 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
             </div>
             <style>{`
                 @media print {
-                    @page { size: A4 portrait; margin: 15mm; }
+                    @page { size: A4 portrait; margin: 0; }
                     body * { visibility: hidden; }
                     #print-area, #print-area * { visibility: visible; }
                     #print-area {
-                        position: absolute;
+                        position: fixed;
                         left: 0;
                         top: 0;
-                        width: 100vw;
-                        height: 100vh;
-                        padding: 10mm;
+                        width: 210mm;
+                        height: 297mm;
+                        padding: 20mm;
                         box-sizing: border-box;
                         background: white;
                     }
@@ -553,7 +563,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                                 </tbody>
                                             </table>
                                             <p className="leading-relaxed">
-                                                귀하는 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
+                                                귀원은 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
                                             </p>
                                             <p className="leading-relaxed">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
@@ -832,7 +842,7 @@ function AdminView() {
                                         <tr key={`record-${r.id}-${i}`} className={`hover:bg-indigo-50 transition-colors ${editModeEnabled?'cursor-pointer':''}`} onClick={()=>editModeEnabled&&setEditingRecord(r)}>
                                             <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':''}`}>{r.date}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
                                             <td className="p-3">{r.dept}</td><td className="p-3 font-bold">{r.realName}</td>
-                                            <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type==='발생'?'bg-blue-50 text-blue-600':'bg-orange-50 text-orange-600'}`}>{r.type}</span>{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-2"></div>}</td>
+                                            <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type==='발생'?'bg-blue-50 text-blue-600':'bg-orange-50 text-orange-600'}`}>{r.type}</span>{editModeEnabled&&<div className="byte border-b border-dashed border-indigo-400 mt-2"></div>}</td>
                                             <td className={`p-3 font-bold ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':(r.type==='사용'?'text-orange-600':'text-indigo-600')}`}>{r.isCanceled?0:(r.type==='사용'?'-':'')+r.days}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
                                             <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
                                             <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
@@ -864,7 +874,7 @@ function AdminView() {
                                 <div className="flex flex-wrap gap-2">{departments.map((d,i)=><div key={`dept-${i}`} className="bg-white border px-3 py-1 rounded text-sm flex gap-2 items-center">{d}<button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('departments', departments.filter(x=>x!==d)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                             </div>
                             <div className="border-t pt-8 border-slate-200">
-                                <h2 className="text-lg font-bold mb-4">관리자 비밀번호 변경</h2>
+                                <h2 className="text-lg font-label mb-4 font-bold">관리자 비밀번호 변경</h2>
                                 <div className="flex gap-2"><input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/><button onClick={()=>{if(!newPw)return; dbUpdateSettings('adminPassword', newPw); setNewPw(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
                             </div>
                             <div className="border-t pt-8 border-slate-200">

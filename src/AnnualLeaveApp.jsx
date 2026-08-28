@@ -341,8 +341,8 @@ const ConfirmDialog = ({ open, message, onConfirm, onCancel }) => {
 const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
     if (!record) return null;
     return (
-        <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4">
-            <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4 print:p-0 print:bg-white print:inset-auto">
+            <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:w-full">
                 <div className="p-4 bg-slate-100 border-b flex justify-between items-center print:hidden">
                     <h2 className="font-bold text-lg flex items-center gap-2"><Icons.List /> 휴가 신청서 출력</h2>
                     <div className="flex gap-2">
@@ -350,7 +350,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         <button onClick={onClose} className="text-slate-500 p-2 hover:bg-slate-200 rounded"><Icons.X /></button>
                     </div>
                 </div>
-                <div className="p-8 overflow-auto bg-white" id="print-area">
+                <div className="p-8 overflow-auto bg-white print:p-0" id="print-area">
                     <h1 className="text-3xl font-black text-center mb-8 tracking-widest decoration-4 underline underline-offset-8">휴가 신청서</h1>
                     <div className="flex justify-between items-end mb-4">
                         <div className="text-sm">문서번호: AL-{record.date.replace(/-/g, '')}-{record.id.substring(record.id.length-4).toUpperCase()}<br/>출력일자: {new Date().toLocaleDateString()}</div>
@@ -611,7 +611,7 @@ const EditRecordModal = ({ record, onSave, onClose }) => {
 };
 
 function AdminView() {
-    const { setUser, departments, employees, leaveRecords, approvalLine, companyName, showToast, showConfirm, publicPath } = useContext(AppContext);
+    const { setUser, departments, employees, leaveRecords, approvalLine, companyName, showToast, showConfirm, dbUpdateSettings, publicPath } = useContext(AppContext);
     const [tab, setTab] = useState('직원 관리');
     
     const [empForm, setEmpForm] = useState({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
@@ -878,7 +878,7 @@ function AdminView() {
                         <div className="w-1/3 bg-slate-50 p-6 rounded border h-fit">
                             <h2 className="text-lg font-bold mb-4">신청서 결재란 설정</h2>
                             <div className="flex gap-2 mb-4"><input type="text" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; dbUpdateSettings('approvalLine', [...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
-                            <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalList.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
+                            <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalLine.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                         </div>
                     </div>
                 )}

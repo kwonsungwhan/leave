@@ -1,19 +1,12 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, signInWithCustomToken } from "firebase/auth";
+import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
 
-// 데이터베이스 기본 환경 설정
-const rawAppId = typeof __app_id !== 'undefined' ? String(__app_id) : 'leave-app';
-const appId = rawAppId.replace(/[^a-zA-Z0-9_-]/g, '-'); // Firebase 경로(짝수 세그먼트) 오류 방지용 치환
-let firebaseConfig = {};
-
-if (typeof __firebase_config !== 'undefined') {
-    firebaseConfig = JSON.parse(__firebase_config);
-} else {
-    // 🚨 중요: Vercel 배포를 위해 본인의 Firebase 설정값을 아래에 덮어쓰세요!
-    firebaseConfig = {
-        apiKey: "AIzaSyCMD3R63avtYeb4o7IfOVUoZq_5iT-_QB0",
+// 🚨 중요: 아래 내용 중 "여기에_입력" 부분을 지우고 본인의 진짜 열쇠 값으로 덮어쓰세요!
+// (쌍따옴표 " " 와 끝에 있는 쉼표 , 는 지워지지 않게 주의해 주세요)
+const firebaseConfig = {
+  apiKey: "AIzaSyCMD3R63avtYeb4o7IfOVUoZq_5iT-_QB0",
   authDomain: "leave-app-289a4.firebaseapp.com",
   databaseURL: "https://leave-app-289a4-default-rtdb.firebaseio.com",
   projectId: "leave-app-289a4",
@@ -21,8 +14,7 @@ if (typeof __firebase_config !== 'undefined') {
   messagingSenderId: "839617511338",
   appId: "1:839617511338:web:373f9942593b5f67ceb5d3",
   measurementId: "G-CJEK7PV7QW"
-    };
-}
+};
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -86,6 +78,7 @@ const exportCSV = (data, filename) => {
 
 export default function AnnualLeaveApp() {
     const [isReady, setIsReady] = useState(false);
+    const [hasConfigError, setHasConfigError] = useState(false);
     const [user, setUser] = useState(null);
     const [employees, setEmployees] = useState([]);
     const [departments, setDepartments] = useState(['관리소']);
@@ -96,7 +89,7 @@ export default function AnnualLeaveApp() {
     const [toastMsg, setToastMsg] = useState({ text: '', type: '' });
     const [confirmState, setConfirmState] = useState({ open: false, message: '', onConfirm: null });
 
-    const publicPath = `artifacts/${appId}/public/data`;
+    const publicPath = `leave-app/data`;
 
     const showToast = (text, type = 'success') => {
         setToastMsg({ text, type });
@@ -108,17 +101,18 @@ export default function AnnualLeaveApp() {
     };
 
     useEffect(() => {
+        if (firebaseConfig.apiKey === "여기에_API_KEY_입력" || firebaseConfig.apiKey.includes("여기에")) {
+            setHasConfigError(true);
+            return;
+        }
+
         const initFirebase = async () => {
             try {
-                if (typeof __initial_auth_token !== 'undefined') {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                await signInAnonymously(auth);
                 setIsReady(true);
             } catch (error) {
                 console.error("DB 연결 실패:", error);
-                showToast('데이터베이스 연결에 실패했습니다.', 'error');
+                showToast('데이터베이스 연결에 실패했습니다. 설정을 확인해 주세요.', 'error');
             }
         };
         initFirebase();
@@ -127,7 +121,6 @@ export default function AnnualLeaveApp() {
     useEffect(() => {
         if (!isReady || !auth.currentUser) return;
 
-        // 1. 설정 동기화
         const unsubSettings = onSnapshot(doc(db, publicPath, 'settings', 'global'), (snap) => {
             if (snap.exists()) {
                 const d = snap.data();
@@ -145,12 +138,10 @@ export default function AnnualLeaveApp() {
             }
         }, (err) => console.error(err));
 
-        // 2. 직원 데이터 동기화
         const unsubEmps = onSnapshot(collection(db, publicPath, 'employees'), (snap) => {
             setEmployees(snap.docs.map(d => ({ empId: d.id, ...d.data() })));
         }, (err) => console.error(err));
 
-        // 3. 연차 내역 동기화
         const unsubRecords = onSnapshot(collection(db, publicPath, 'leaveRecords'), (snap) => {
             setLeaveRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         }, (err) => console.error(err));
@@ -200,11 +191,9 @@ export default function AnnualLeaveApp() {
                 }
             }
         };
-        // leaveRecords가 변경될 때마다 실행하면 무한루프 위험이 있으므로 employees 배열이 바뀔 때만 검사
         syncAutoLeave();
     }, [isReady, employees]);
 
-    // 데이터베이스 수정용 함수들
     const dbUpdateSettings = async (key, value) => {
         await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });
     };
@@ -213,6 +202,24 @@ export default function AnnualLeaveApp() {
         user, setUser, employees, departments, leaveRecords, adminPassword, approvalLine, companyName, 
         showToast, showConfirm, dbUpdateSettings, publicPath
     };
+
+    if (hasConfigError) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
+                <div className="bg-white p-8 rounded-xl shadow-xl w-full max-w-md text-center border-t-4 border-red-500">
+                    <h2 className="text-xl font-black text-slate-800 mb-2">Firebase 설정 필요 🔑</h2>
+                    <p className="text-slate-600 mb-6 text-sm leading-relaxed">
+                        현재 코드에 <b>가짜 열쇠(안내 문구)</b>가 들어있어<br/>데이터베이스에 접속하지 못하고 있습니다.
+                    </p>
+                    <div className="bg-slate-100 p-4 rounded text-sm text-left text-slate-700 font-bold mb-4 break-words">
+                        우측 코드 에디터의 10~17번째 줄을 보시면<br/>
+                        <span className="text-red-500">"여기에_API_KEY_입력"</span> 등의 글씨가 있습니다.<br/><br/>
+                        이 부분을 Firebase에서 발급받은 <br/>진짜 열쇠 값으로 교체해 주세요!
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     if (!isReady) return <div className="min-h-screen flex items-center justify-center bg-slate-50 font-bold text-indigo-600 animate-pulse">데이터베이스 연결 중... 잠시만 기다려주세요.</div>;
 
@@ -234,7 +241,6 @@ function LoginView() {
     const [name, setName] = useState('');
     const [pw, setPw] = useState('');
 
-    // 부서 목록이 로드되면 기본값 세팅
     useEffect(() => { if (!dept && departments.length > 0) setDept(departments[0]); }, [departments]);
 
     const handleLogin = (e) => {
@@ -406,9 +412,11 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
 
 const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     const { companyName } = useContext(AppContext);
-    if (!allEmployees) return null;
+    
     const [selectedEmp, setSelectedEmp] = useState(null);
     const [docType, setDocType] = useState('촉구서');
+
+    if (!allEmployees) return null;
 
     const calculateStatus = (emp) => {
         const myRecords = records.filter(r => r.empId === emp.empId);
@@ -547,7 +555,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             </table>
 
                                             <p className="leading-relaxed font-bold underline">
-                                                귀하는 위 지정된 휴가일에 반드시 연차를 사용하여야 하며, 해당 일에 출근하더라도 노무수령 거부 의사를 명확히 할 것인바 연차는 소진된 것으로 처리되고 금전적 보상 의무가 면제됨을 알려드립니다.
+                                                귀하는 위 지정된 휴가일에 반드시 연차를 사용하여야 강제 소진되지 않습니다.
                                             </p>
 
                                             <div className="text-center mt-16 font-bold text-lg">{new Date().toLocaleDateString()}</div>
@@ -655,7 +663,6 @@ function AdminView() {
         showConfirm('정말 삭제하시겠습니까? (해당 직원의 모든 휴가 내역도 함께 영구 삭제됩니다)', async () => {
             try {
                 await deleteDoc(doc(db, publicPath, 'employees', empId));
-                // 직원의 휴가 내역도 일괄 삭제
                 const userRecs = leaveRecords.filter(r => r.empId === empId);
                 for(let r of userRecs) {
                     await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));

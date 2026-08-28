@@ -76,7 +76,6 @@ const exportCSV = (data, filename) => {
 
 export default function AnnualLeaveApp() {
     const [isReady, setIsReady] = useState(false);
-    const [hasConfigError, setHasConfigError] = useState(false);
     const [user, setUser] = useState(null);
     const [employees, setEmployees] = useState([]);
     const [departments, setDepartments] = useState(['관리소']);
@@ -106,7 +105,7 @@ export default function AnnualLeaveApp() {
                 setIsReady(true);
             } catch (error) {
                 console.error("DB 연결 실패:", error);
-                showToast('데이터베이스 연결에 실패했습니다. 설정을 확인해 주세요.', 'error');
+                showToast('데이터베이스 연결에 실패했습니다.', 'error');
             }
         };
         initFirebase();
@@ -189,15 +188,14 @@ export default function AnnualLeaveApp() {
 
             if (expected.length > 0) {
                 for (const ex of expected) {
-                    const existingRecords = leaveRecords.filter(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
-                    if (existingRecords.length === 0) {
-                        const emp = employees.find(e => e.empId === ex.empId);
-                        if (emp) {
-                            try {
-                                await setDoc(doc(db, publicPath, 'leaveRecords', ex.id), { ...ex, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false });
-                            } catch (e) {
-                                console.error("자동 발생 에러", e);
-                            }
+                    const emp = employees.find(e => e.empId === ex.empId);
+                    if (emp) {
+                        try {
+                            await setDoc(doc(db, publicPath, 'leaveRecords', ex.id), { 
+                                ...ex, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
+                            }, { merge: true });
+                        } catch (e) {
+                            console.error("자동 발생 에러", e);
                         }
                     }
                 }
@@ -205,36 +203,13 @@ export default function AnnualLeaveApp() {
         };
         
         syncAutoLeave();
-    }, [isReady, employees, leaveRecords]);
+    }, [isReady, employees]);
 
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0 || hasCleanedUp) return;
 
         const performMaintenance = async () => {
             let didCleanup = false;
-
-            // 1. 중복 데이터 자동 청소
-            const autoRecords = leaveRecords.filter(r => r.isAuto && r.type === '발생');
-            const grouped = {};
-            autoRecords.forEach(r => {
-                const key = `${r.empId}_${r.date}`;
-                if (!grouped[key]) grouped[key] = [];
-                grouped[key].push(r);
-            });
-
-            for (const key in grouped) {
-                const records = grouped[key];
-                if (records.length > 1) {
-                    for (let i = 1; i < records.length; i++) {
-                        try {
-                            await deleteDoc(doc(db, publicPath, 'leaveRecords', records[i].id));
-                            didCleanup = true;
-                        } catch(e) { console.error("중복 청소 에러:", e); }
-                    }
-                }
-            }
-
-            // 2. 4년(약 1460일) 경과된 과거 데이터 영구 삭제
             const fourYearsAgo = new Date();
             fourYearsAgo.setFullYear(fourYearsAgo.getFullYear() - 4); 
 
@@ -249,13 +224,13 @@ export default function AnnualLeaveApp() {
                         await deleteDoc(doc(db, publicPath, 'leaveRecords', record.id));
                         didCleanup = true;
                     } catch (err) {
-                        console.error("4년 경과 데이터 삭제 에러:", err);
+                        console.error("4년 경과 데이터 자동 삭제 에러:", err);
                     }
                 }
             }
             
             setHasCleanedUp(true);
-            if (didCleanup) showToast('시스템 자동 유지보수(중복 및 4년 경과 데이터 정리)가 완료되었습니다.', 'success');
+            if (didCleanup) showToast('시스템 자동 유지보수(4년 경과 데이터 정리)가 완료되었습니다.', 'success');
         };
 
         performMaintenance();
@@ -269,17 +244,6 @@ export default function AnnualLeaveApp() {
         user, setUser, employees, departments, leaveRecords, adminPassword, approvalLine, companyName, 
         showToast, showConfirm, dbUpdateSettings, publicPath
     };
-
-    if (hasConfigError) {
-        return (
-            <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-4">
-                <div className="bg-white p-8 rounded-xl shadow-xl w-full max-w-md text-center border-t-4 border-red-500">
-                    <h2 className="text-xl font-black text-slate-800 mb-2">Firebase 설정 오류</h2>
-                    <p className="text-slate-600 mb-6 text-sm leading-relaxed">키 값이 올바르지 않습니다.</p>
-                </div>
-            </div>
-        );
-    }
 
     if (!isReady) return <div className="min-h-screen flex items-center justify-center bg-slate-50 font-bold text-indigo-600 animate-pulse">데이터베이스 연결 중... 잠시만 기다려주세요.</div>;
 
@@ -393,7 +357,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         <table className="border-collapse text-center text-sm border-2 border-black">
                             <tbody>
                                 <tr>
-                                    <td rowSpan="2" className="border border-black bg-slate-100 p-2 font-bold w-12 writing-vertical">결재</td>
+                                    <td rowSpan="2" className="border border-black bg-slate-100 p-2 font-bold w-12">결재</td>
                                     {approvalLine.map((line, i) => <td key={i} className="border border-black bg-slate-100 p-1 w-20">{line}</td>)}
                                 </tr>
                                 <tr>
@@ -420,7 +384,23 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                     </div>
                 </div>
             </div>
-            <style>{`@media print { body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4; margin: 20mm; } }`}</style>
+            <style>{`
+                @media print {
+                    @page { size: A4 portrait; margin: 15mm; }
+                    body * { visibility: hidden; }
+                    #print-area, #print-area * { visibility: visible; }
+                    #print-area {
+                        position: absolute;
+                        left: 0;
+                        top: 0;
+                        width: 100vw;
+                        height: 100vh;
+                        padding: 10mm;
+                        box-sizing: border-box;
+                        background: white;
+                    }
+                }
+            `}</style>
         </div>
     );
 };
@@ -465,7 +445,7 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                     </table>
                 </div>
             </div>
-             <style>{`@media print { body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100%; } @page { size: A4; margin: 15mm; } }`}</style>
+             <style>{`@media print { @page { size: A4 portrait; margin: 15mm; } body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100vw; } }`}</style>
         </div>
     );
 };
@@ -565,26 +545,6 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             </p>
                                             <div className="text-center mt-16 font-bold text-lg">{new Date().toLocaleDateString()}</div>
                                             <div className="text-right mt-16 text-xl font-black">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
-                                            
-                                            <hr className="border-t-2 border-black border-dashed my-12" />
-
-                                            <h1 className="text-xl font-black text-center mb-8">연차 유급휴가 사용계획 통보서</h1>
-                                            <p className="mb-4">본인은 위와 같이 미사용 연차 유급휴가 일수를 확인하였으며, 아래와 같이 사용 계획을 통보합니다.</p>
-                                            <table className="w-full border-collapse border border-black text-center mb-12 text-sm">
-                                                 <thead className="bg-slate-100">
-                                                     <tr><th className="border border-black p-2">사용 예정일</th><th className="border border-black p-2">일수</th><th className="border border-black p-2">비고</th></tr>
-                                                 </thead>
-                                                 <tbody>
-                                                     <tr><td className="border border-black p-2 h-10"></td><td className="border border-black p-2"></td><td className="border border-black p-2"></td></tr>
-                                                     <tr><td className="border border-black p-2 h-10"></td><td className="border border-black p-2"></td><td className="border border-black p-2"></td></tr>
-                                                     <tr><td className="border border-black p-2 h-10"></td><td className="border border-black p-2"></td><td className="border border-black p-2"></td></tr>
-                                                 </tbody>
-                                            </table>
-                                            <div className="flex justify-end items-end pr-12 mt-12">
-                                                <span className="mr-4">근로자 성명 :</span>
-                                                <div className="w-48 border-b-2 border-black border-dotted h-6 mr-2"></div>
-                                                <span>(서명/인)</span>
-                                            </div>
                                         </div>
                                     ) : (
                                         <div className="space-y-8 text-base">
@@ -601,35 +561,8 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <p className="leading-relaxed">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
                                             </p>
-                                            
-                                            <h3 className="font-bold text-lg mt-8 mb-2">[회사 지정 연차 사용일]</h3>
-                                            <table className="w-full border-collapse border border-black text-center mb-8 text-sm">
-                                                 <thead className="bg-slate-100">
-                                                     <tr><th className="border border-black p-2">지정 사용일</th><th className="border border-black p-2">일수</th><th className="border border-black p-2">비고</th></tr>
-                                                 </thead>
-                                                 <tbody>
-                                                     <tr><td className="border border-black p-2 h-10"></td><td className="border border-black p-2"></td><td className="border border-black p-2"></td></tr>
-                                                     <tr><td className="border border-black p-2 h-10"></td><td className="border border-black p-2"></td><td className="border border-black p-2"></td></tr>
-                                                 </tbody>
-                                            </table>
-
-                                            <p className="leading-relaxed font-bold underline">
-                                                귀하는 위 지정된 휴가일에 반드시 연차를 사용하여야 강제 소진되지 않습니다.
-                                            </p>
-
                                             <div className="text-center mt-16 font-bold text-lg">{new Date().toLocaleDateString()}</div>
                                             <div className="text-right mt-16 text-xl font-black">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
-
-                                            <hr className="border-t-2 border-black border-dashed my-12" />
-
-                                            <div className="text-right mt-12 pr-12 flex flex-col items-end">
-                                                <div className="text-sm text-slate-500 mb-4 text-right">위 통지문을 정히 수령함.</div>
-                                                <div className="flex items-end">
-                                                    <span className="mr-4">수령자(근로자) 성명 :</span>
-                                                    <div className="w-48 border-b-2 border-black border-dotted h-6 mr-2"></div>
-                                                    <span>(서명/인)</span>
-                                                </div>
-                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -638,7 +571,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                     </div>
                 </div>
             </div>
-             <style>{`@media print { body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100%; height: auto;} @page { size: A4; margin: 20mm; } }`}</style>
+             <style>{`@media print { @page { size: A4 portrait; margin: 15mm; } body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100vw; } }`}</style>
         </div>
     );
 };
@@ -678,7 +611,7 @@ const EditRecordModal = ({ record, onSave, onClose }) => {
 };
 
 function AdminView() {
-    const { setUser, departments, employees, leaveRecords, approvalLine, companyName, showToast, showConfirm, dbUpdateSettings, publicPath } = useContext(AppContext);
+    const { setUser, departments, employees, leaveRecords, approvalLine, companyName, showToast, showConfirm, publicPath } = useContext(AppContext);
     const [tab, setTab] = useState('직원 관리');
     
     const [empForm, setEmpForm] = useState({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
@@ -749,7 +682,7 @@ function AdminView() {
 
     const handleBulkDelete = () => {
         if (!delDate.start || !delDate.end) return showToast('삭제할 기간을 선택하세요.', 'error');
-        showConfirm(`정말 완전 삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간의 모든 데이터가 복구 불가능하게 영구 삭제됩니다.`, async () => {
+        showConfirm(`정말 영구 일괄삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간의 모든 데이터가 데이터베이스에서 완전히 삭제됩니다.`, async () => {
             try {
                 const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end);
                 for(let r of targets) {
@@ -907,18 +840,8 @@ function AdminView() {
                                             <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
                                             <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                                                 {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
-                                                {!r.isCanceled && (
-                                                    <button onClick={()=>{
-                                                        showConfirm('삭제(취소선) 처리하시겠습니까?\n(기록은 남겨둠)', async () => {
-                                                            try {
-                                                                await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자 취소]` });
-                                                                showToast('취소선 처리됨');
-                                                            } catch(err) { showToast('오류 발생', 'error'); }
-                                                        });
-                                                    }} className="block w-full text-xs bg-orange-50 text-orange-600 px-2 py-1.5 rounded border border-orange-200 font-bold hover:bg-orange-100">취소(선긋기)</button>
-                                                )}
                                                 <button onClick={()=>{
-                                                    showConfirm('이 기록을 데이터베이스에서 완전히 삭제하시겠습니까?\n(경고: 절대 복구할 수 없습니다!)', async () => {
+                                                    showConfirm('이 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {
                                                         try {
                                                             await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
                                                             showToast('영구 삭제되었습니다.');
@@ -955,7 +878,7 @@ function AdminView() {
                         <div className="w-1/3 bg-slate-50 p-6 rounded border h-fit">
                             <h2 className="text-lg font-bold mb-4">신청서 결재란 설정</h2>
                             <div className="flex gap-2 mb-4"><input type="text" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; dbUpdateSettings('approvalLine', [...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
-                            <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalLine.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
+                            <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalList.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                         </div>
                     </div>
                 )}

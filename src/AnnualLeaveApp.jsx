@@ -1,4 +1,32 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously, signInWithCustomToken } from "firebase/auth";
+import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
+
+// 데이터베이스 기본 환경 설정
+const rawAppId = typeof __app_id !== 'undefined' ? String(__app_id) : 'leave-app';
+const appId = rawAppId.replace(/[^a-zA-Z0-9_-]/g, '-'); // Firebase 경로(짝수 세그먼트) 오류 방지용 치환
+let firebaseConfig = {};
+
+if (typeof __firebase_config !== 'undefined') {
+    firebaseConfig = JSON.parse(__firebase_config);
+} else {
+    // 🚨 중요: Vercel 배포를 위해 본인의 Firebase 설정값을 아래에 덮어쓰세요!
+    firebaseConfig = {
+        apiKey: "AIzaSyCMD3R63avtYeb4o7IfOVUoZq_5iT-_QB0",
+  authDomain: "leave-app-289a4.firebaseapp.com",
+  databaseURL: "https://leave-app-289a4-default-rtdb.firebaseio.com",
+  projectId: "leave-app-289a4",
+  storageBucket: "leave-app-289a4.firebasestorage.app",
+  messagingSenderId: "839617511338",
+  appId: "1:839617511338:web:373f9942593b5f67ceb5d3",
+  measurementId: "G-CJEK7PV7QW"
+    };
+}
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
 
 const Icons = {
     Briefcase: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
@@ -14,7 +42,6 @@ const Icons = {
 
 const AppContext = createContext();
 
-// 1개월 또는 1년이 되는 정확한 날짜(일(Day) 기준) 계산용 함수
 const addMonthsExact = (dateStr, months) => {
     const [y, m, d] = dateStr.split('-').map(Number);
     const date = new Date(y, m - 1 + months, d);
@@ -34,32 +61,19 @@ const maskName = (name) => {
 
 const exportCSV = (data, filename) => {
     if (!data || !data.length) return;
-    const headerMap = {
-        date: '일자', dept: '부서', realName: '성명', type: '구분', days: '일수', remark: '사유', isCanceled: '상태'
-    };
+    const headerMap = { date: '일자', dept: '부서', realName: '성명', type: '구분', days: '일수', remark: '사유', isCanceled: '상태' };
     const csvRows = [];
-    csvRows.push('\uFEFF' + Object.values(headerMap).join(',')); // 한글 깨짐 방지 BOM 추가
-    
+    csvRows.push('\uFEFF' + Object.values(headerMap).join(',')); 
     for (const row of data) {
         const values = Object.keys(headerMap).map(k => {
             let val = row[k] === null || row[k] === undefined ? '' : row[k];
-            if (k === 'isCanceled') {
-                val = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '삭제됨' : '정상';
-            }
-            if (k === 'days') {
-                val = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '0' : (row.type === '사용' ? `-${row.days}` : row.days);
-            }
-            if (k === 'remark') {
-                const remarkBase = val;
-                const history = row.history ? ` ${row.history}` : '';
-                const canceledMark = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '[삭제됨] ' : '';
-                val = canceledMark + remarkBase + history;
-            }
-            return `"${val.toString().replace(/"/g, '""')}"`; // CSV 이스케이프
+            if (k === 'isCanceled') val = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '삭제됨' : '정상';
+            if (k === 'days') val = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '0' : (row.type === '사용' ? `-${row.days}` : row.days);
+            if (k === 'remark') val = (row.isCanceled || (row.isAuto && !row.isFulfilled) ? '[삭제됨] ' : '') + val + (row.history ? ` ${row.history}` : '');
+            return `"${val.toString().replace(/"/g, '""')}"`; 
         });
         csvRows.push(values.join(','));
     }
-    
     const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -70,52 +84,19 @@ const exportCSV = (data, filename) => {
     document.body.removeChild(link);
 };
 
-const Toast = ({ message, type = 'success' }) => {
-    if (!message) return null;
-    return (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] animate-in fade-in slide-in-from-top-4 duration-300">
-            <div className={`px-6 py-3 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 ${type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-800 text-white'}`}>
-                <Icons.AlertCircle /> {message}
-            </div>
-        </div>
-    );
-};
-
-const ConfirmDialog = ({ open, message, onConfirm, onCancel }) => {
-    if (!open) return null;
-    return (
-        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[10000] p-4">
-            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm text-center animate-in zoom-in-95 duration-200">
-                <div className="text-red-500 mb-4 flex justify-center"><Icons.AlertCircle /></div>
-                <h3 className="font-bold text-lg mb-6 text-slate-800 whitespace-pre-line">{message}</h3>
-                <div className="flex gap-2">
-                    <button onClick={onCancel} className="flex-1 bg-slate-200 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-300 transition">취소</button>
-                    <button onClick={() => { onConfirm(); onCancel(); }} className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition">확인</button>
-                </div>
-            </div>
-        </div>
-    );
-};
-
 export default function AnnualLeaveApp() {
+    const [isReady, setIsReady] = useState(false);
     const [user, setUser] = useState(null);
-    const [employees, setEmployees] = useState(() => JSON.parse(localStorage.getItem('al_emps_v2')) || []);
-    const [departments, setDepartments] = useState(() => JSON.parse(localStorage.getItem('al_depts_v2')) || ['관리소', '경비반', '미화반']);
-    const [leaveRecords, setLeaveRecords] = useState(() => JSON.parse(localStorage.getItem('al_records_v2')) || []);
-    const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem('al_admin_pw_v2') || '1234');
-    const [approvalLine, setApprovalLine] = useState(() => JSON.parse(localStorage.getItem('al_approval_v2')) || ['담 당', '과 장', '소 장']);
-    const [companyName, setCompanyName] = useState(() => localStorage.getItem('al_company_name_v2') || '우리회사(주)');
+    const [employees, setEmployees] = useState([]);
+    const [departments, setDepartments] = useState(['관리소']);
+    const [leaveRecords, setLeaveRecords] = useState([]);
+    const [adminPassword, setAdminPassword] = useState('1234');
+    const [approvalLine, setApprovalLine] = useState(['결 재']);
+    const [companyName, setCompanyName] = useState('우리회사');
     const [toastMsg, setToastMsg] = useState({ text: '', type: '' });
-    
-    // 글로벌 확인창 상태
     const [confirmState, setConfirmState] = useState({ open: false, message: '', onConfirm: null });
 
-    useEffect(() => localStorage.setItem('al_emps_v2', JSON.stringify(employees)), [employees]);
-    useEffect(() => localStorage.setItem('al_depts_v2', JSON.stringify(departments)), [departments]);
-    useEffect(() => localStorage.setItem('al_records_v2', JSON.stringify(leaveRecords)), [leaveRecords]);
-    useEffect(() => localStorage.setItem('al_admin_pw_v2', adminPassword), [adminPassword]);
-    useEffect(() => localStorage.setItem('al_approval_v2', JSON.stringify(approvalLine)), [approvalLine]);
-    useEffect(() => localStorage.setItem('al_company_name_v2', companyName), [companyName]);
+    const publicPath = `artifacts/${appId}/public/data`;
 
     const showToast = (text, type = 'success') => {
         setToastMsg({ text, type });
@@ -126,76 +107,120 @@ export default function AnnualLeaveApp() {
         setConfirmState({ open: true, message, onConfirm });
     };
 
-    // 연차 자동 발생 동기화 로직
-    const syncLeaveRecords = () => {
-        const today = new Date();
-        const expected = [];
-        
-        employees.forEach(emp => {
-            if (!emp.joinDate) return;
-            const joinDateStr = emp.joinDate; // YYYY-MM-DD
-            
-            // 1년 미만: 1개월 단위
-            for (let m = 1; m <= 11; m++) {
-                const targetDateStr = addMonthsExact(joinDateStr, m);
-                const targetDateObj = new Date(targetDateStr);
-                if (today >= targetDateObj) {
-                    expected.push({ date: targetDateStr, type: '발생', days: 1, remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+    useEffect(() => {
+        const initFirebase = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
                 }
+                setIsReady(true);
+            } catch (error) {
+                console.error("DB 연결 실패:", error);
+                showToast('데이터베이스 연결에 실패했습니다.', 'error');
             }
+        };
+        initFirebase();
+    }, []);
 
-            // 1년 이상
-            const [jy, jm, jd] = joinDateStr.split('-').map(Number);
-            const joinD = new Date(jy, jm - 1, jd);
-            const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
-            
-            if (years >= 1) {
-                for (let y = 1; y <= Math.floor(years); y++) {
-                    const targetDateStr = addYearsExact(joinDateStr, y);
-                    const targetDateObj = new Date(targetDateStr);
-                    if (today >= targetDateObj) {
-                        let base = 15;
-                        if (y >= 3) base += Math.floor((y - 1) / 2);
-                        base = Math.min(base, 25);
-                        expected.push({ date: targetDateStr, type: '발생', days: base, remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
-                    }
-                }
-            }
-        });
+    useEffect(() => {
+        if (!isReady || !auth.currentUser) return;
 
-        if (expected.length > 0) {
-            setLeaveRecords(prev => {
-                let newRecords = [...prev];
-                let hasChanges = false;
-                expected.forEach(ex => {
-                    const exists = newRecords.find(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
-                    if (!exists) {
-                        // 중복 방지 ID 생성
-                        newRecords.push({ ...ex, id: `auto-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, dept: employees.find(e=>e.empId===ex.empId)?.dept, name: employees.find(e=>e.empId===ex.empId)?.name, realName: employees.find(e=>e.empId===ex.empId)?.realName, isCanceled: false });
-                        hasChanges = true;
-                    }
+        // 1. 설정 동기화
+        const unsubSettings = onSnapshot(doc(db, publicPath, 'settings', 'global'), (snap) => {
+            if (snap.exists()) {
+                const d = snap.data();
+                setDepartments(d.departments || ['관리소', '경비반', '미화반']);
+                setAdminPassword(d.adminPassword || '1234');
+                setApprovalLine(d.approvalLine || ['담 당', '과 장', '소 장']);
+                setCompanyName(d.companyName || '우리회사(주)');
+            } else {
+                setDoc(doc(db, publicPath, 'settings', 'global'), {
+                    departments: ['관리소', '경비반', '미화반'],
+                    adminPassword: '1234',
+                    approvalLine: ['담 당', '과 장', '소 장'],
+                    companyName: '우리회사(주)'
                 });
-                return hasChanges ? newRecords : prev;
-            });
-        }
-    };
+            }
+        }, (err) => console.error(err));
 
-    // 직원이 변경될 때마다 자동 연차 동기화 즉시 실행
-    useEffect(() => { syncLeaveRecords(); }, [employees]);
+        // 2. 직원 데이터 동기화
+        const unsubEmps = onSnapshot(collection(db, publicPath, 'employees'), (snap) => {
+            setEmployees(snap.docs.map(d => ({ empId: d.id, ...d.data() })));
+        }, (err) => console.error(err));
+
+        // 3. 연차 내역 동기화
+        const unsubRecords = onSnapshot(collection(db, publicPath, 'leaveRecords'), (snap) => {
+            setLeaveRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, (err) => console.error(err));
+
+        return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
+    }, [isReady]);
+
+    useEffect(() => {
+        const syncAutoLeave = async () => {
+            if (!isReady || !auth.currentUser || employees.length === 0) return;
+            const today = new Date();
+            const expected = [];
+            
+            employees.forEach(emp => {
+                if (!emp.joinDate) return;
+                const joinDateStr = emp.joinDate;
+                
+                for (let m = 1; m <= 11; m++) {
+                    const targetDateStr = addMonthsExact(joinDateStr, m);
+                    if (today >= new Date(targetDateStr)) {
+                        expected.push({ date: targetDateStr, type: '발생', days: 1, remark: `입사 ${m}개월 만근 연차 (자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+                    }
+                }
+                const [jy, jm, jd] = joinDateStr.split('-').map(Number);
+                const years = (today - new Date(jy, jm - 1, jd)) / (1000 * 60 * 60 * 24 * 365);
+                if (years >= 1) {
+                    for (let y = 1; y <= Math.floor(years); y++) {
+                        const targetDateStr = addYearsExact(joinDateStr, y);
+                        if (today >= new Date(targetDateStr)) {
+                            let base = 15;
+                            if (y >= 3) base += Math.floor((y - 1) / 2);
+                            base = Math.min(base, 25);
+                            expected.push({ date: targetDateStr, type: '발생', days: base, remark: `입사 ${y}년차 연차 (자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId });
+                        }
+                    }
+                }
+            });
+
+            for (const ex of expected) {
+                const exists = leaveRecords.find(r => r.empId === ex.empId && r.date === ex.date && r.isAuto && r.type === '발생');
+                if (!exists) {
+                    const newId = `auto-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+                    const empInfo = employees.find(e => e.empId === ex.empId);
+                    await setDoc(doc(db, publicPath, 'leaveRecords', newId), {
+                        ...ex, dept: empInfo?.dept, name: empInfo?.name, realName: empInfo?.realName, isCanceled: false
+                    });
+                }
+            }
+        };
+        // leaveRecords가 변경될 때마다 실행하면 무한루프 위험이 있으므로 employees 배열이 바뀔 때만 검사
+        syncAutoLeave();
+    }, [isReady, employees]);
+
+    // 데이터베이스 수정용 함수들
+    const dbUpdateSettings = async (key, value) => {
+        await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });
+    };
 
     const ctx = {
-        user, setUser, employees, setEmployees, departments, setDepartments,
-        leaveRecords, setLeaveRecords, adminPassword, setAdminPassword,
-        approvalLine, setApprovalLine, companyName, setCompanyName, 
-        showToast, showConfirm
+        user, setUser, employees, departments, leaveRecords, adminPassword, approvalLine, companyName, 
+        showToast, showConfirm, dbUpdateSettings, publicPath
     };
+
+    if (!isReady) return <div className="min-h-screen flex items-center justify-center bg-slate-50 font-bold text-indigo-600 animate-pulse">데이터베이스 연결 중... 잠시만 기다려주세요.</div>;
 
     return (
         <AppContext.Provider value={ctx}>
             <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
                 <Toast message={toastMsg.text} type={toastMsg.type} />
                 <ConfirmDialog open={confirmState.open} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={() => setConfirmState({...confirmState, open: false})} />
-                
                 {!user ? <LoginView /> : user.role === 'admin' ? <AdminView /> : <UserView />}
             </div>
         </AppContext.Provider>
@@ -208,6 +233,9 @@ function LoginView() {
     const [dept, setDept] = useState(departments[0] || '');
     const [name, setName] = useState('');
     const [pw, setPw] = useState('');
+
+    // 부서 목록이 로드되면 기본값 세팅
+    useEffect(() => { if (!dept && departments.length > 0) setDept(departments[0]); }, [departments]);
 
     const handleLogin = (e) => {
         e.preventDefault();
@@ -252,6 +280,33 @@ function LoginView() {
         </div>
     );
 }
+
+const Toast = ({ message, type = 'success' }) => {
+    if (!message) return null;
+    return (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className={`px-6 py-3 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 ${type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-800 text-white'}`}>
+                <Icons.AlertCircle /> {message}
+            </div>
+        </div>
+    );
+};
+
+const ConfirmDialog = ({ open, message, onConfirm, onCancel }) => {
+    if (!open) return null;
+    return (
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[10000] p-4">
+            <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm text-center animate-in zoom-in-95 duration-200">
+                <div className="text-red-500 mb-4 flex justify-center"><Icons.AlertCircle /></div>
+                <h3 className="font-bold text-lg mb-6 text-slate-800 whitespace-pre-line">{message}</h3>
+                <div className="flex gap-2">
+                    <button onClick={onCancel} className="flex-1 bg-slate-200 text-slate-700 py-3 rounded-lg font-bold hover:bg-slate-300 transition">취소</button>
+                    <button onClick={() => { onConfirm(); onCancel(); }} className="flex-1 bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition">확인</button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
     if (!record) return null;
@@ -351,13 +406,9 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
 
 const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     const { companyName } = useContext(AppContext);
-    
-    // 이전에 발생한 에러 원인: Hook(useState)을 if문 아래에 두어서 발생했습니다. 
-    // 정상 작동을 위해 무조건 if문 위로 끌어올렸습니다.
+    if (!allEmployees) return null;
     const [selectedEmp, setSelectedEmp] = useState(null);
     const [docType, setDocType] = useState('촉구서');
-
-    if (!allEmployees) return null;
 
     const calculateStatus = (emp) => {
         const myRecords = records.filter(r => r.empId === emp.empId);
@@ -523,12 +574,11 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
              <style>{`@media print { body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100%; height: auto;} @page { size: A4; margin: 20mm; } }`}</style>
         </div>
     );
-}
+};
 
 const EditRecordModal = ({ record, onSave, onClose }) => {
     const [editData, setEditData] = useState({});
     
-    // 컴포넌트가 열려있는 동안에도 클릭한 새 데이터(record)로 즉시 동기화되도록 수정
     useEffect(() => {
         if (record) setEditData({ ...record });
     }, [record]);
@@ -561,10 +611,10 @@ const EditRecordModal = ({ record, onSave, onClose }) => {
 };
 
 function AdminView() {
-    const { setUser, departments, setDepartments, employees, setEmployees, leaveRecords, setLeaveRecords, setAdminPassword, approvalLine, setApprovalLine, companyName, setCompanyName, showToast, showConfirm } = useContext(AppContext);
+    const { setUser, departments, employees, leaveRecords, approvalLine, companyName, showToast, showConfirm, dbUpdateSettings, publicPath } = useContext(AppContext);
     const [tab, setTab] = useState('직원 관리');
     
-    const [empForm, setEmpForm] = useState({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '' });
+    const [empForm, setEmpForm] = useState({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
     const [editingEmpId, setEditingEmpId] = useState(null);
 
     const [filterDept, setFilterDept] = useState('');
@@ -584,55 +634,76 @@ function AdminView() {
     const [newPw, setNewPw] = useState('');
     const [newCompany, setNewCompany] = useState('');
 
-    const handleEmpSubmit = (e) => {
+    const handleEmpSubmit = async (e) => {
         e.preventDefault();
         const maskedName = maskName(empForm.name);
-        if (editingEmpId) {
-            setEmployees(employees.map(emp => emp.empId === editingEmpId ? { ...emp, ...empForm, name: maskedName, realName: empForm.name } : emp));
-            showToast('직원 정보가 수정되었습니다.');
-        } else {
-            if (employees.find(emp => emp.empId === empForm.empId)) return showToast('이미 존재하는 사원번호입니다.', 'error');
-            setEmployees([...employees, { ...empForm, name: maskedName, realName: empForm.name, pw: '1234' }]);
-            showToast('신규 직원이 등록되었습니다.');
-        }
-        setEmpForm({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '' });
-        setEditingEmpId(null);
+        try {
+            if (editingEmpId) {
+                await setDoc(doc(db, publicPath, 'employees', editingEmpId), { ...empForm, name: maskedName, realName: empForm.name }, { merge: true });
+                showToast('직원 정보가 수정되었습니다.');
+            } else {
+                if (employees.find(emp => emp.empId === empForm.empId)) return showToast('이미 존재하는 사원번호입니다.', 'error');
+                await setDoc(doc(db, publicPath, 'employees', empForm.empId), { ...empForm, name: maskedName, realName: empForm.name });
+                showToast('신규 직원이 등록되었습니다.');
+            }
+            setEmpForm({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
+            setEditingEmpId(null);
+        } catch(err) { showToast('DB 저장 실패', 'error'); }
     };
 
     const handleDeleteEmp = (empId) => {
-        showConfirm('정말 삭제하시겠습니까? (해당 직원의 모든 휴가 내역도 함께 영구 삭제됩니다)', () => {
-            setEmployees(employees.filter(e => e.empId !== empId));
-            setLeaveRecords(leaveRecords.filter(r => r.empId !== empId));
-            showToast('직원 및 관련 휴가 내역이 삭제되었습니다.');
+        showConfirm('정말 삭제하시겠습니까? (해당 직원의 모든 휴가 내역도 함께 영구 삭제됩니다)', async () => {
+            try {
+                await deleteDoc(doc(db, publicPath, 'employees', empId));
+                // 직원의 휴가 내역도 일괄 삭제
+                const userRecs = leaveRecords.filter(r => r.empId === empId);
+                for(let r of userRecs) {
+                    await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
+                }
+                showToast('직원 및 관련 휴가 내역이 삭제되었습니다.');
+            } catch(err) { showToast('삭제 실패', 'error'); }
         });
     };
 
-    const handleProxySubmit = () => {
+    const handleProxySubmit = async () => {
         if (!proxyLeave.empId || !proxyLeave.date) return showToast('직원과 날짜를 선택하세요.', 'error');
         const emp = employees.find(e => e.empId === proxyLeave.empId);
-        setLeaveRecords([...leaveRecords, {
-            id: `proxy-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, empId: emp.empId, dept: emp.dept, name: emp.name, realName: emp.realName,
-            date: proxyLeave.date, type: '사용', days: parseFloat(proxyLeave.days), remark: proxyLeave.remark, isCanceled: false,
-            history: `[${new Date().toLocaleDateString()} 관리자 대리등록]`
-        }]);
-        showToast('대리 신청이 등록되었습니다.');
+        const newId = `proxy-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        
+        try {
+            await setDoc(doc(db, publicPath, 'leaveRecords', newId), {
+                empId: emp.empId, dept: emp.dept, name: emp.name, realName: emp.realName,
+                date: proxyLeave.date, type: '사용', days: parseFloat(proxyLeave.days), remark: proxyLeave.remark, isCanceled: false,
+                history: `[${new Date().toLocaleDateString()} 관리자 대리등록]`
+            });
+            showToast('대리 신청이 등록되었습니다.');
+            setProxyLeave({ empId: '', date: '', days: 1, remark: '' });
+        } catch(err) { showToast('등록 실패', 'error'); }
     };
 
     const handleBulkDelete = () => {
         if (!delDate.start || !delDate.end) return showToast('삭제할 기간을 선택하세요.', 'error');
-        showConfirm(`정말 완전 삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간의 모든 데이터가 복구 불가능하게 영구 삭제됩니다.`, () => {
-            setLeaveRecords(leaveRecords.filter(r => r.date < delDate.start || r.date > delDate.end));
-            showToast('일괄 완전 삭제가 완료되었습니다.');
+        showConfirm(`정말 완전 삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간의 모든 데이터가 복구 불가능하게 영구 삭제됩니다.`, async () => {
+            try {
+                const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end);
+                for(let r of targets) {
+                    await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
+                }
+                showToast(`${targets.length}개의 내역이 영구 삭제되었습니다.`);
+            } catch(err) { showToast('삭제 실패', 'error'); }
         });
     };
 
-    const handleSaveRecord = (editedData) => {
+    const handleSaveRecord = async (editedData) => {
         let h = editedData.history || '';
         if(!editedData.isFulfilled && editedData.isAuto) editedData.remark = '조건미달';
         h += ` [${new Date().toLocaleDateString()} 관리자 수정]`;
-        setLeaveRecords(leaveRecords.map(r => r.id === editedData.id ? { ...editedData, history: h } : r));
-        setEditingRecord(null); // 모달 닫기
-        showToast('내역이 수정되었습니다.');
+        
+        try {
+            await updateDoc(doc(db, publicPath, 'leaveRecords', editedData.id), { ...editedData, history: h });
+            setEditingRecord(null);
+            showToast('내역이 수정되었습니다.');
+        } catch(err) { showToast('수정 실패', 'error'); }
     };
 
     const filteredRecords = leaveRecords.filter(r => {
@@ -656,7 +727,7 @@ function AdminView() {
             {promoModalOpen && <PrintPromotionModal allEmployees={employees} records={leaveRecords} onClose={()=>setPromoModalOpen(false)} />}
             
             <header className="flex justify-between items-center bg-white p-4 rounded-xl shadow mb-4">
-                <div className="flex items-center gap-2 font-black text-slate-700 text-lg"><Icons.Briefcase /> 관리자 시스템</div>
+                <div className="flex items-center gap-2 font-black text-slate-700 text-lg"><Icons.Briefcase /> 관리자 시스템 (서버 연결됨)</div>
                 <div className="flex items-center gap-4 text-sm">
                     <span className="font-bold">관리자님 환영합니다</span>
                     <button onClick={() => setUser(null)} className="flex items-center gap-1 text-slate-500 hover:text-slate-800"><Icons.LogOut /> 로그아웃</button>
@@ -670,7 +741,6 @@ function AdminView() {
             </div>
 
             <main className="flex-1 bg-white rounded-b-lg rounded-tr-lg shadow-sm border p-6 overflow-hidden flex flex-col">
-                {}
                 {tab === '직원 관리' && (
                     <div className="flex gap-6 h-full overflow-hidden">
                         <div className="w-1/3 bg-slate-50 p-6 rounded border overflow-auto">
@@ -679,40 +749,39 @@ function AdminView() {
                                 <div><label className="block font-bold mb-1">사원번호</label><input required disabled={!!editingEmpId} type="text" value={empForm.empId} onChange={e => setEmpForm({ ...empForm, empId: e.target.value })} className="w-full border p-2 rounded disabled:bg-slate-200" placeholder="예: 2026001" /></div>
                                 <div><label className="block font-bold mb-1">부서명</label><select value={empForm.dept} onChange={e => setEmpForm({ ...empForm, dept: e.target.value })} className="w-full border p-2 rounded">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
                                 <div><label className="block font-bold mb-1">성명</label><input required type="text" value={empForm.name} onChange={e => setEmpForm({ ...empForm, name: e.target.value })} className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 마스킹)" /></div>
+                                {!editingEmpId && <div><label className="block font-bold mb-1">초기 비밀번호 (직원 접속용)</label><input type="text" value={empForm.pw} onChange={e => setEmpForm({ ...empForm, pw: e.target.value })} className="w-full border p-2 rounded" /></div>}
                                 <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={empForm.gender === '남성'} onChange={() => setEmpForm({ ...empForm, gender: '남성' })} /> 남성</label><label><input type="radio" checked={empForm.gender === '여성'} onChange={() => setEmpForm({ ...empForm, gender: '여성' })} /> 여성</label></div></div>
                                 <div><label className="block font-bold mb-1">입사일 (기준일)</label><input required type="date" value={empForm.joinDate} onChange={e => setEmpForm({ ...empForm, joinDate: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 <div><label className="block font-bold mb-1">비고</label><input type="text" value={empForm.remark} onChange={e => setEmpForm({ ...empForm, remark: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 <div className="flex gap-2">
-                                    {editingEmpId && <button type="button" onClick={() => { setEditingEmpId(null); setEmpForm({ empId: '', dept: departments[0], name: '', gender: '남성', joinDate: '', remark: '' }); }} className="flex-1 bg-slate-300 text-slate-700 py-2 rounded font-bold hover:bg-slate-400">취소</button>}
+                                    {editingEmpId && <button type="button" onClick={() => { setEditingEmpId(null); setEmpForm({ empId: '', dept: departments[0], name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' }); }} className="flex-1 bg-slate-300 text-slate-700 py-2 rounded font-bold hover:bg-slate-400">취소</button>}
                                     <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded font-bold hover:bg-indigo-700">{editingEmpId ? '수정하기' : '등록하기'}</button>
                                 </div>
                             </form>
                         </div>
                         <div className="w-2/3 border rounded overflow-hidden flex flex-col">
                             <table className="w-full text-sm text-center border-collapse">
-                                <thead className="bg-slate-100"><tr><th className="p-3 border-b">사원번호</th><th className="p-3 border-b">부서</th><th className="p-3 border-b">성명(실명)</th><th className="p-3 border-b">성별</th><th className="p-3 border-b">입사일</th><th className="p-3 border-b">비고</th><th className="p-3 border-b">관리</th></tr></thead>
+                                <thead className="bg-slate-100"><tr><th className="p-3 border-b">사원번호</th><th className="p-3 border-b">부서</th><th className="p-3 border-b">성명(실명)</th><th className="p-3 border-b">비밀번호</th><th className="p-3 border-b">입사일</th><th className="p-3 border-b">관리</th></tr></thead>
                                 <tbody className="divide-y overflow-auto h-full">
                                     {employees.map((emp, i) => (
                                         <tr key={`emp-${emp.empId}-${i}`} className="hover:bg-slate-50 transition-colors">
-                                            <td className="p-3">{emp.empId}</td><td className="p-3">{emp.dept}</td><td className="p-3 font-bold">{emp.realName}</td><td className="p-3">{emp.gender}</td><td className="p-3">{emp.joinDate}</td><td className="p-3 text-slate-500">{emp.remark}</td>
+                                            <td className="p-3">{emp.empId}</td><td className="p-3">{emp.dept}</td><td className="p-3 font-bold">{emp.realName}</td><td className="p-3 text-slate-400">{emp.pw}</td><td className="p-3">{emp.joinDate}</td>
                                             <td className="p-3 space-x-1 whitespace-nowrap">
                                                 <button onClick={() => { setEditingEmpId(emp.empId); setEmpForm({ ...emp, name: emp.realName }); }} className="text-xs bg-slate-200 px-2 py-1.5 rounded font-bold hover:bg-slate-300">수정</button>
                                                 <button onClick={() => handleDeleteEmp(emp.empId)} className="text-xs bg-red-100 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-200">삭제</button>
                                             </td>
                                         </tr>
                                     ))}
-                                    {employees.length === 0 && <tr><td colSpan="7" className="p-8 text-slate-400">등록된 직원이 없습니다.</td></tr>}
+                                    {employees.length === 0 && <tr><td colSpan="6" className="p-8 text-slate-400">등록된 직원이 없습니다.</td></tr>}
                                 </tbody>
                             </table>
                         </div>
                     </div>
                 )}
                 
-                {}
                 {tab === '휴가 내역(전체)' && (
                     <div className="flex flex-col h-full gap-4">
                         <div className="bg-slate-50 p-4 border rounded flex flex-col gap-4">
-                            {/* 1. 필터/조회 줄 */}
                             <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-slate-600 w-16 shrink-0">1. 필터</span>
                                 <select className="border p-1.5 rounded w-32 bg-white" value={filterDept} onChange={e => {setFilterDept(e.target.value); setFilterName('');}}>
@@ -733,7 +802,6 @@ function AdminView() {
                                 <button onClick={() => exportCSV(filteredRecords, '휴가내역')} className="bg-green-600 text-white px-3 py-1.5 rounded shadow flex items-center gap-1 ml-auto font-bold hover:bg-green-700 shrink-0"><Icons.Download /> 엑셀 다운로드</button>
                             </div>
                             
-                            {/* 2. 대리 신청 줄 */}
                             <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-slate-600 w-16 shrink-0">2. 신청</span>
                                 <select className="border p-1.5 rounded w-32 bg-white" value={proxyLeave.empId} onChange={e=>setProxyLeave({...proxyLeave, empId:e.target.value})}><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{e.realName}</option>)}</select>
@@ -743,7 +811,6 @@ function AdminView() {
                                 <button onClick={handleProxySubmit} className="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-indigo-700 shrink-0">등록</button>
                             </div>
 
-                            {/* 3. 일괄 삭제 줄 */}
                             <div className="flex items-center gap-3 text-sm text-red-600 border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-red-700 w-16 shrink-0">3. 삭제</span>
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.start} onChange={e=>setDelDate({...delDate, start:e.target.value})}/> ~ 
@@ -752,7 +819,6 @@ function AdminView() {
                                 <span className="text-xs font-normal text-slate-500">(지정 기간 내역 영구 삭제)</span>
                             </div>
 
-                            {/* 4. 개별 수정 줄 */}
                             <div className="flex items-center gap-3 text-sm flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-slate-600 w-16 shrink-0">4. 수정</span>
                                 <label className="flex items-center gap-2 cursor-pointer bg-slate-200 px-4 py-1.5 rounded shadow-inner hover:bg-slate-300 transition-colors">
@@ -777,9 +843,11 @@ function AdminView() {
                                                 {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold mb-1 w-full hover:bg-indigo-200">신청서</button>}
                                                 {!r.isCanceled && (
                                                     <button onClick={()=>{
-                                                        showConfirm('삭제(취소선) 처리하시겠습니까?', () => {
-                                                             setLeaveRecords(leaveRecords.map(x=>x.id===r.id?{...x,isCanceled:true,history:(x.history||'') + ` [${new Date().toLocaleDateString()} 관리자 삭제]`}:x));
-                                                             showToast('취소선 처리됨');
+                                                        showConfirm('삭제(취소선) 처리하시겠습니까?', async () => {
+                                                            try {
+                                                                await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자 삭제]` });
+                                                                showToast('취소선 처리됨');
+                                                            } catch(err) { showToast('오류 발생', 'error'); }
                                                         });
                                                     }} className="text-xs bg-red-50 text-red-600 px-2 py-1.5 rounded border border-red-200 font-bold w-full hover:bg-red-100">개별삭제</button>
                                                 )}
@@ -793,28 +861,27 @@ function AdminView() {
                     </div>
                 )}
                 
-                {}
                 {tab === '시스템 설정' && (
                     <div className="flex gap-6 h-full p-4 overflow-auto">
                         <div className="w-1/3 bg-slate-50 p-6 rounded border space-y-8 h-fit">
                             <div>
                                 <h2 className="text-lg font-bold mb-4">부서 관리</h2>
-                                <div className="flex gap-2 mb-4"><input type="text" value={newDept} onChange={e=>setNewDept(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 부서명"/><button onClick={()=>{if(!newDept)return; setDepartments([...departments, newDept]); setNewDept(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
-                                <div className="flex flex-wrap gap-2">{departments.map((d,i)=><div key={`dept-${i}`} className="bg-white border px-3 py-1 rounded text-sm flex gap-2 items-center">{d}<button onClick={()=>{showConfirm('삭제하시겠습니까?', () => setDepartments(departments.filter(x=>x!==d)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
+                                <div className="flex gap-2 mb-4"><input type="text" value={newDept} onChange={e=>setNewDept(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 부서명"/><button onClick={()=>{if(!newDept)return; dbUpdateSettings('departments', [...departments, newDept]); setNewDept(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
+                                <div className="flex flex-wrap gap-2">{departments.map((d,i)=><div key={`dept-${i}`} className="bg-white border px-3 py-1 rounded text-sm flex gap-2 items-center">{d}<button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('departments', departments.filter(x=>x!==d)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                             </div>
                             <div className="border-t pt-8 border-slate-200">
                                 <h2 className="text-lg font-bold mb-4">관리자 비밀번호 변경</h2>
-                                <div className="flex gap-2"><input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/><button onClick={()=>{if(!newPw)return; setAdminPassword(newPw); setNewPw(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
+                                <div className="flex gap-2"><input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/><button onClick={()=>{if(!newPw)return; dbUpdateSettings('adminPassword', newPw); setNewPw(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
                             </div>
                             <div className="border-t pt-8 border-slate-200">
                                 <h2 className="text-lg font-bold mb-4">회사명 설정</h2>
-                                <div className="flex gap-2"><input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder={`현재: ${companyName}`}/><button onClick={()=>{if(!newCompany)return; setCompanyName(newCompany); setNewCompany(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
+                                <div className="flex gap-2"><input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder={`현재: ${companyName}`}/><button onClick={()=>{if(!newCompany)return; dbUpdateSettings('companyName', newCompany); setNewCompany(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
                             </div>
                         </div>
                         <div className="w-1/3 bg-slate-50 p-6 rounded border h-fit">
                             <h2 className="text-lg font-bold mb-4">신청서 결재란 설정</h2>
-                            <div className="flex gap-2 mb-4"><input type="text" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; setApprovalLine([...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
-                            <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => setApprovalLine(approvalLine.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
+                            <div className="flex gap-2 mb-4"><input type="text" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; dbUpdateSettings('approvalLine', [...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
+                            <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalLine.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                         </div>
                     </div>
                 )}
@@ -824,7 +891,7 @@ function AdminView() {
 }
 
 function UserView() {
-    const { user, setUser, leaveRecords, setLeaveRecords, showToast, showConfirm, approvalLine } = useContext(AppContext);
+    const { user, setUser, leaveRecords, approvalLine, showToast, showConfirm, publicPath } = useContext(AppContext);
     const [applyDate, setApplyDate] = useState('');
     const [applyDays, setApplyDays] = useState(1);
     const [applyRemark, setApplyRemark] = useState('');
@@ -835,22 +902,30 @@ function UserView() {
     const used = userRecords.filter(r => r.type === '사용' && !r.isCanceled).reduce((a, b) => a + b.days, 0);
     const remain = gen - used;
 
-    const handleApply = (e) => {
+    const handleApply = async (e) => {
         e.preventDefault();
         if (!applyDate) return;
-        setLeaveRecords([...leaveRecords, {
-            id: `user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`, empId: user.empId, dept: user.dept, name: user.name, realName: user.realName,
-            date: applyDate, type: '사용', days: parseFloat(applyDays), remark: applyRemark, isCanceled: false,
-            history: `[${new Date().toLocaleDateString()} 본인신청]`
-        }]);
-        showToast('신청 완료'); setApplyDate(''); setApplyRemark('');
+        
+        const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+        try {
+            await setDoc(doc(db, publicPath, 'leaveRecords', newId), {
+                empId: user.empId, dept: user.dept, name: user.name, realName: user.realName,
+                date: applyDate, type: '사용', days: parseFloat(applyDays), remark: applyRemark, isCanceled: false,
+                history: `[${new Date().toLocaleDateString()} 본인신청]`
+            });
+            showToast('신청 완료'); 
+            setApplyDate(''); 
+            setApplyRemark('');
+        } catch(err) {
+            showToast('신청 중 오류가 발생했습니다.', 'error');
+        }
     };
 
     return (
         <div className="max-w-[1000px] mx-auto p-4 flex flex-col h-screen">
             <PrintApplicationModal record={printModal} user={user} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
             <header className="flex justify-between items-center bg-white p-4 rounded-xl shadow mb-4">
-                <div className="flex items-center gap-2 font-black text-indigo-700 text-lg"><Icons.Calendar /> 연차 관리 시스템</div>
+                <div className="flex items-center gap-2 font-black text-indigo-700 text-lg"><Icons.Calendar /> 연차 관리 시스템 (서버 연결됨)</div>
                 <div className="flex items-center gap-4 text-sm">
                     <span className="font-bold">{user.dept} {user.realName}님 환영합니다</span>
                     <button onClick={() => setUser(null)} className="flex items-center gap-1 text-slate-500 hover:text-slate-800"><Icons.LogOut /> 로그아웃</button>
@@ -858,7 +933,6 @@ function UserView() {
             </header>
             <main className="flex-1 flex gap-6 overflow-hidden">
                 <div className="w-1/3 flex flex-col gap-6 overflow-auto">
-                    {/* 통계 박스를 1줄로 나란히 표시되도록 flex gap 적용 및 크기 조정 */}
                     <div className="flex gap-2 bg-white p-4 rounded-xl shadow border">
                         <div className="flex-1 text-center bg-blue-50 py-3 rounded-lg"><div className="text-[10px] text-slate-500 mb-1 font-bold">총 발생</div><div className="text-lg font-black text-blue-700">{gen}일</div></div>
                         <div className="flex-1 text-center bg-orange-50 py-3 rounded-lg"><div className="text-[10px] text-slate-500 mb-1 font-bold">사용</div><div className="text-lg font-black text-orange-700">{used}일</div></div>
@@ -891,9 +965,11 @@ function UserView() {
                                             {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="w-full block text-xs border border-indigo-200 text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded mb-1 font-bold hover:bg-indigo-100">신청서</button>}
                                             {!r.isAuto && r.type==='사용' && !r.isCanceled && (
                                                 <button onClick={()=>{
-                                                    showConfirm('신청을 취소하시겠습니까?', () => {
-                                                        setLeaveRecords(leaveRecords.map(x=>x.id===r.id?{...x,isCanceled:true,history:(x.history||'') + ` [${new Date().toLocaleDateString()} 본인취소]`}:x));
-                                                        showToast('취소됨');
+                                                    showConfirm('신청을 취소하시겠습니까?', async () => {
+                                                        try {
+                                                            await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 본인취소]` });
+                                                            showToast('취소됨');
+                                                        } catch(err) { showToast('오류 발생', 'error'); }
                                                     });
                                                 }} className="w-full block text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50">삭제</button>
                                             )}

@@ -143,69 +143,6 @@ export default function AnnualLeaveApp() {
     }, [isReady]);
 
     useEffect(() => {
-        const syncAutoLeave = async () => {
-            if (!isReady || employees.length === 0) return;
-            const today = new Date();
-            const expected = [];
-            
-            employees.forEach(emp => {
-                if (!emp.joinDate) return;
-                const joinDateStr = emp.joinDate;
-                
-                for (let m = 1; m <= 11; m++) {
-                    const targetDateStr = addMonthsExact(joinDateStr, m);
-                    if (today >= new Date(targetDateStr)) {
-                        expected.push({ 
-                            id: `auto-${emp.empId}-${targetDateStr}`, 
-                            date: targetDateStr, type: '발생', days: 1, 
-                            remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, 
-                            isAuto: true, isFulfilled: true, empId: emp.empId 
-                        });
-                    }
-                }
-
-                const [jy, jm, jd] = joinDateStr.split('-').map(Number);
-                const joinD = new Date(jy, jm - 1, jd);
-                const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
-                
-                if (years >= 1) {
-                    for (let y = 1; y <= Math.floor(years); y++) {
-                        const targetDateStr = addYearsExact(joinDateStr, y);
-                        if (today >= new Date(targetDateStr)) {
-                            let base = 15;
-                            if (y >= 3) base += Math.floor((y - 1) / 2);
-                            base = Math.min(base, 25);
-                            expected.push({ 
-                                id: `auto-${emp.empId}-${targetDateStr}`, 
-                                date: targetDateStr, type: '발생', days: base, 
-                                remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, 
-                                isAuto: true, isFulfilled: true, empId: emp.empId 
-                            });
-                        }
-                    }
-                }
-            });
-
-            if (expected.length > 0) {
-                for (const ex of expected) {
-                    const emp = employees.find(e => e.empId === ex.empId);
-                    if (emp) {
-                        try {
-                            await setDoc(doc(db, publicPath, 'leaveRecords', ex.id), { 
-                                ...ex, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
-                            }, { merge: true });
-                        } catch (e) {
-                            console.error("자동 발생 에러", e);
-                        }
-                    }
-                }
-            }
-        };
-        
-        syncAutoLeave();
-    }, [isReady, employees]);
-
-    useEffect(() => {
         if (!isReady || leaveRecords.length === 0 || hasCleanedUp) return;
 
         const performMaintenance = async () => {
@@ -230,11 +167,71 @@ export default function AnnualLeaveApp() {
             }
             
             setHasCleanedUp(true);
-            if (didCleanup) showToast('시스템 자동 유지보수(4년 경과 데이터 정리)가 완료되었습니다.', 'success');
+            if (didCleanup) showToast('4년 경과 데이터 자동 정리가 완료되었습니다.', 'success');
         };
 
         performMaintenance();
     }, [isReady, leaveRecords, hasCleanedUp]);
+
+    useEffect(() => {
+        const syncAutoLeave = async () => {
+            if (!isReady || employees.length === 0) return;
+            const today = new Date();
+            const expectedMap = new Map();
+            
+            employees.forEach(emp => {
+                if (!emp.joinDate) return;
+                const joinDateStr = emp.joinDate;
+                
+                for (let m = 1; m <= 11; m++) {
+                    const targetDateStr = addMonthsExact(joinDateStr, m);
+                    if (today >= new Date(targetDateStr)) {
+                        const uniqueId = `auto-${emp.empId}-${targetDateStr}`;
+                        expectedMap.set(uniqueId, { 
+                            id: uniqueId, 
+                            date: targetDateStr, type: '발생', days: 1, 
+                            remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, 
+                            isAuto: true, isFulfilled: true, empId: emp.empId,
+                            dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
+                        });
+                    }
+                }
+
+                const [jy, jm, jd] = joinDateStr.split('-').map(Number);
+                const joinD = new Date(jy, jm - 1, jd);
+                const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
+                
+                if (years >= 1) {
+                    for (let y = 1; y <= Math.floor(years); y++) {
+                        const targetDateStr = addYearsExact(joinDateStr, y);
+                        if (today >= new Date(targetDateStr)) {
+                            let base = 15;
+                            if (y >= 3) base += Math.floor((y - 1) / 2);
+                            base = Math.min(base, 25);
+                            const uniqueId = `auto-${emp.empId}-${targetDateStr}`;
+                            expectedMap.set(uniqueId, { 
+                                id: uniqueId, 
+                                date: targetDateStr, type: '발생', days: base, 
+                                remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, 
+                                isAuto: true, isFulfilled: true, empId: emp.empId,
+                                dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
+                            });
+                        }
+                    }
+                }
+            });
+
+            for (const [id, ex] of expectedMap.entries()) {
+                try {
+                    await setDoc(doc(db, publicPath, 'leaveRecords', id), ex, { merge: true });
+                } catch (e) {
+                    console.error("자동 발생 에러", e);
+                }
+            }
+        };
+        
+        syncAutoLeave();
+    }, [isReady, employees]);
 
     const dbUpdateSettings = async (key, value) => {
         await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });

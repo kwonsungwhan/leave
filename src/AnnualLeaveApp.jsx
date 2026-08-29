@@ -141,7 +141,43 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
-    // 연차 자동 발생 및 무한 증식 원천 방지 로직
+    // 🕒 매일 자정(24시) 4년 전 데이터 자동 영구 삭제 백그라운드 타이머
+    useEffect(() => {
+        if (!isReady) return;
+
+        const checkAndPurgeFourYearOldData = async () => {
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const cutoffYear = currentYear - 4;
+
+            try {
+                for (const rec of leaveRecords) {
+                    if (!rec.date) continue;
+                    const recYear = parseInt(rec.date.split('-')[0], 10);
+                    if (recYear <= cutoffYear) {
+                        await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
+                    }
+                }
+            } catch (err) {
+                console.error("24시 자동 청소 에러:", err);
+            }
+        };
+
+        checkAndPurgeFourYearOldData();
+
+        const scheduleMidnightCheck = () => {
+            const now = new Date();
+            const millisTillMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0) - now;
+            return setTimeout(() => {
+                checkAndPurgeFourYearOldData();
+                scheduleMidnightCheck();
+            }, millisTillMidnight);
+        };
+
+        const timerId = scheduleMidnightCheck();
+        return () => clearTimeout(timerId);
+    }, [isReady, leaveRecords]);
+
     useEffect(() => {
         const syncAutoLeave = async () => {
             if (!isReady || employees.length === 0) return;
@@ -151,7 +187,6 @@ export default function AnnualLeaveApp() {
                 if (!emp.joinDate) continue;
                 const joinDateStr = emp.joinDate;
                 
-                // 1년 미만: 1개월 단위
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     if (today >= new Date(targetDateStr)) {
@@ -170,7 +205,6 @@ export default function AnnualLeaveApp() {
                     }
                 }
 
-                // 1년 이상
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
@@ -317,8 +351,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         <button onClick={onClose} className="text-slate-500 p-2 hover:bg-slate-200 rounded"><Icons.X /></button>
                     </div>
                 </div>
-                {/* A4 규격 엄격 맞춤 인쇄 영역 */}
-                <div className="p-12 overflow-auto bg-white print:p-8 print:w-[210mm] print:h-[297mm] print:mx-auto print:box-border" id="print-area">
+                <div className="p-12 overflow-auto bg-white print:p-[20mm] print:w-[210mm] print:h-[297mm] print:mx-auto print:box-border" id="print-area">
                     <h1 className="text-3xl font-black text-center mb-8 tracking-widest decoration-4 underline underline-offset-8">휴가 신청서</h1>
                     <div className="flex justify-between items-end mb-6">
                         <div className="text-sm">문서번호: AL-{record.date.replace(/-/g, '')}-{record.id.substring(record.id.length-4).toUpperCase()}<br/>출력일자: {new Date().toLocaleDateString()}</div>
@@ -648,16 +681,15 @@ function AdminView() {
         } catch(err) { showToast('등록 실패', 'error'); }
     };
 
-    // 일괄 영구 삭제 기능 (완벽 수정)
     const handleBulkDelete = () => {
         if (!delDate.start || !delDate.end) return showToast('삭제할 기간을 선택하세요.', 'error');
-        showConfirm(`정말 영구 일괄삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간의 모든 데이터가 데이터베이스에서 완전히 삭제됩니다.`, async () => {
+        showConfirm(`정말 영구 일괄삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다.`, async () => {
             try {
-                const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end);
+                const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end && r.type === '발생');
                 for(let r of targets) {
                     await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
                 }
-                showToast(`${targets.length}개의 내역이 영구 삭제되었습니다.`);
+                showToast(`${targets.length}개의 '발생' 내역이 영구 삭제되었습니다.`);
             } catch(err) { showToast('삭제 실패', 'error'); }
         });
     };
@@ -783,8 +815,8 @@ function AdminView() {
                                 <span className="font-bold text-red-700 w-16 shrink-0">3. 삭제</span>
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.start} onChange={e=>setDelDate({...delDate, start:e.target.value})}/> ~ 
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.end} onChange={e=>setDelDate({...delDate, end:e.target.value})}/>
-                                <button onClick={handleBulkDelete} className="bg-red-600 text-white px-4 py-1.5 rounded shadow-sm font-bold hover:bg-red-700 shrink-0">영구 일괄삭제</button>
-                                <span className="text-xs font-normal text-slate-500">(지정 기간 내역 영구 삭제)</span>
+                                <button onClick={handleBulkDelete} className="bg-red-600 text-white px-4 py-1.5 rounded shadow-sm font-bold hover:bg-red-700 shrink-0">발생내역 일괄 영구삭제</button>
+                                <span className="text-xs font-normal text-slate-500">(지정 기간 내 '발생' 내역 영구 삭제)</span>
                             </div>
 
                             <div className="flex items-center gap-3 text-sm flex-nowrap overflow-x-auto whitespace-nowrap">
@@ -809,14 +841,28 @@ function AdminView() {
                                             <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
                                             <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                                                 {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
-                                                <button onClick={()=>{
-                                                    showConfirm('이 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {
-                                                        try {
-                                                            await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
-                                                            showToast('영구 삭제되었습니다.');
-                                                        } catch(err) { showToast('삭제 오류', 'error'); }
-                                                    });
-                                                }} className="block w-full text-xs bg-red-100 text-red-700 px-2 py-1.5 rounded border border-red-300 font-bold hover:bg-red-200 mt-1">영구 삭제</button>
+                                                {/* 발생 데이터: 관리자 영구 삭제 가능 / 사용 데이터: 영구 삭제 불가, 오직 줄긋기 취소만 가능 */}
+                                                {r.type === '발생' ? (
+                                                    <button onClick={()=>{
+                                                        showConfirm('이 발생 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {
+                                                            try {
+                                                                await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
+                                                                showToast('영구 삭제되었습니다.');
+                                                            } catch(err) { showToast('삭제 오류', 'error'); }
+                                                        });
+                                                    }} className="block w-full text-xs bg-red-100 text-red-700 px-2 py-1.5 rounded border border-red-300 font-bold hover:bg-red-200 mt-1">영구 삭제</button>
+                                                ) : (
+                                                    !r.isCanceled && (
+                                                        <button onClick={()=>{
+                                                            showConfirm('이 사용 내역을 취소(줄긋기) 처리하시겠습니까?', async () => {
+                                                                try {
+                                                                    await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자취소]` });
+                                                                    showToast('취소 처리됨');
+                                                                } catch(err) { showToast('오류 발생', 'error'); }
+                                                            });
+                                                        }} className="block w-full text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50 mt-1">취소(줄긋기)</button>
+                                                    )
+                                                )}
                                             </td>
                                         </tr>
                                     ))}
@@ -937,7 +983,7 @@ function UserView() {
                                                             showToast('취소됨');
                                                         } catch(err) { showToast('오류 발생', 'error'); }
                                                     });
-                                                }} className="w-full block text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50">삭제</button>
+                                                }} className="w-full block text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50">삭제(취소)</button>
                                             )}
                                         </td>
                                     </tr>

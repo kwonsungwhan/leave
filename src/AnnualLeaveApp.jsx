@@ -43,10 +43,34 @@ const addYearsExact = (dateStr, years) => {
     return `${y + years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 };
 
+const ENCRYPT_KEY = "LEAVE_APP_SECURE_KEY_2026";
+const encryptName = (name) => {
+    if (!name) return "";
+    try {
+        return btoa(encodeURIComponent(name + "_" + ENCRYPT_KEY));
+    } catch (e) {
+        return name;
+    }
+};
+
+const decryptName = (encoded) => {
+    if (!encoded) return "";
+    try {
+        const decoded = decodeURIComponent(atob(encoded));
+        if (decoded.endsWith("_" + ENCRYPT_KEY)) {
+            return decoded.replace("_" + ENCRYPT_KEY, "");
+        }
+        return encoded;
+    } catch (e) {
+        return encoded; // 평문인 경우 그대로 반환
+    }
+};
+
 const maskName = (name) => {
-    if (!name || name.length < 2) return name;
-    if (name.length === 2) return name[0] + '*';
-    return name[0] + '*'.repeat(name.length - 2) + name[name.length - 1];
+    const actual = decryptName(name);
+    if (!actual || actual.length < 2) return actual;
+    if (actual.length === 2) return actual[0] + '*';
+    return actual[0] + '*'.repeat(actual.length - 2) + actual[actual.length - 1];
 };
 
 const exportCSV = (data, filename) => {
@@ -57,6 +81,7 @@ const exportCSV = (data, filename) => {
     for (const row of data) {
         const values = Object.keys(headerMap).map(k => {
             let val = row[k] === null || row[k] === undefined ? '' : row[k];
+            if (k === 'realName') val = decryptName(val);
             if (k === 'isCanceled') val = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '삭제됨' : '정상';
             if (k === 'days') val = row.isCanceled || (row.isAuto && !row.isFulfilled) ? '0' : (row.type === '사용' ? `-${row.days}` : row.days);
             if (k === 'remark') val = (row.isCanceled || (row.isAuto && !row.isFulfilled) ? '[삭제됨] ' : '') + val + (row.history ? ` ${row.history}` : '');
@@ -141,14 +166,12 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
-    // 🕒 매일 자정(24시) 4년 전 데이터 자동 영구 삭제 백그라운드 타이머
     useEffect(() => {
-        if (!isReady) return;
+        if (!isReady || leaveRecords.length === 0) return;
 
-        const checkAndPurgeFourYearOldData = async () => {
-            const now = new Date();
-            const currentYear = now.getFullYear();
-            const cutoffYear = currentYear - 4;
+        const purgeFourYearOldData = async () => {
+            const currentYear = new Date().getFullYear();
+            const cutoffYear = currentYear - 4; // 예: 2026년 기준 2022년 이전 데이터 삭제
 
             try {
                 for (const rec of leaveRecords) {
@@ -159,17 +182,17 @@ export default function AnnualLeaveApp() {
                     }
                 }
             } catch (err) {
-                console.error("24시 자동 청소 에러:", err);
+                console.error("4년 지난 데이터 자동 청소 에러:", err);
             }
         };
 
-        checkAndPurgeFourYearOldData();
+        purgeFourYearOldData();
 
         const scheduleMidnightCheck = () => {
             const now = new Date();
             const millisTillMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0) - now;
             return setTimeout(() => {
-                checkAndPurgeFourYearOldData();
+                purgeFourYearOldData();
                 scheduleMidnightCheck();
             }, millisTillMidnight);
         };
@@ -276,9 +299,9 @@ function LoginView() {
                 showToast('관리자로 로그인했습니다.');
             } else showToast('비밀번호가 틀렸습니다.', 'error');
         } else {
-            const emp = employees.find(e => e.dept === dept && e.realName === name);
+            const emp = employees.find(e => e.dept === dept && decryptName(e.realName) === name);
             if (emp && pw === emp.pw) {
-                setUser({ role: 'user', ...emp });
+                setUser({ role: 'user', ...emp, realName: decryptName(emp.realName) });
                 showToast(`${maskName(emp.realName)}님 환영합니다.`);
             } else showToast('부서, 성명 또는 비밀번호가 일치하지 않습니다.', 'error');
         }
@@ -341,6 +364,7 @@ const ConfirmDialog = ({ open, message, onConfirm, onCancel }) => {
 
 const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
     if (!record) return null;
+    const decryptedName = decryptName(record.realName || user.realName);
     return (
         <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4 print:p-0 print:bg-white print:inset-auto">
             <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh] print:max-h-none print:shadow-none print:w-full">
@@ -369,7 +393,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                     </div>
                     <table className="w-full border-collapse border-2 border-black mb-8 text-sm">
                         <tbody>
-                            <tr><th className="border border-black bg-slate-100 p-3 w-1/4">부서명</th><td className="border border-black p-3 w-1/4">{record.dept}</td><th className="border border-black bg-slate-100 p-3 w-1/4">성명</th><td className="border border-black p-3 w-1/4 font-bold">{record.realName}</td></tr>
+                            <tr><th className="border border-black bg-slate-100 p-3 w-1/4">부서명</th><td className="border border-black p-3 w-1/4">{record.dept}</td><th className="border border-black bg-slate-100 p-3 w-1/4">성명</th><td className="border border-black p-3 w-1/4 font-bold">{decryptedName}</td></tr>
                             <tr><th className="border border-black bg-slate-100 p-3">휴가 구분</th><td className="border border-black p-3 font-bold text-lg" colSpan="3">연차 유급 휴가</td></tr>
                             <tr><th className="border border-black bg-slate-100 p-3">휴가 기간</th><td className="border border-black p-3" colSpan="3"><strong>{record.date}</strong> 부터 <strong>{record.days}일간</strong></td></tr>
                             <tr><th className="border border-black bg-slate-100 p-3">휴가 사유(목적)</th><td className="border border-black p-3" colSpan="3">{record.remark}</td></tr>
@@ -408,6 +432,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
 
 const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
     if (!employee) return null;
+    const decryptedEmpName = decryptName(employee.realName);
     return (
         <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4">
             <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -422,7 +447,7 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                     <h1 className="text-3xl font-black text-center mb-6">개인별 연차 휴가 집계표</h1>
                     <div className="flex justify-between items-end mb-4">
                         <div className="text-sm">출력일자: {new Date().toLocaleDateString()}</div>
-                        <div className="font-bold text-lg bg-slate-100 px-4 py-2 border rounded">{employee.dept} / {employee.realName}</div>
+                        <div className="font-bold text-lg bg-slate-100 px-4 py-2 border rounded">{employee.dept} / {decryptedEmpName}</div>
                     </div>
                     <div className="flex gap-4 mb-6">
                         <div className="flex-1 bg-blue-50 text-blue-800 p-4 rounded text-center border border-blue-200"><div className="text-sm">총 발생</div><div className="text-2xl font-bold">{gen}일</div></div>
@@ -486,6 +511,8 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
         return {isWarning: false, text: ''};
     }
 
+    const decryptedSelectedName = selectedEmp ? decryptName(selectedEmp.realName) : "";
+
     return (
         <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4">
             <div className="bg-white rounded-lg shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh]">
@@ -500,9 +527,10 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                             {allEmployees.map((emp, i) => {
                                 const st = calculateStatus(emp);
                                 const warn = getWarnings(emp);
+                                const empDecryptedName = decryptName(emp.realName);
                                 return (
                                     <div key={`promo-${emp.empId}-${i}`} className={`p-3 hover:bg-white cursor-pointer transition-colors ${selectedEmp?.empId===emp.empId?'bg-white border-l-4 border-indigo-500':''}`} onClick={() => setSelectedEmp(emp)}>
-                                        <div className="font-bold">{emp.dept} {emp.realName}</div>
+                                        <div className="font-bold">{emp.dept} {empDecryptedName}</div>
                                         <div className="flex justify-between mt-1 text-slate-500">
                                             <span>발생: {st.gen} / 사용: {st.used}</span>
                                             <span className={`font-bold ${warn.isWarning?'text-red-600':''}`}>잔여: {st.remain}일</span>
@@ -527,11 +555,11 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                 </div>
                                 <div className="flex-1 p-12 overflow-auto" id="print-area">
                                     {docType === '촉구서' ? (
-                                        <div className="space-y-8 text-base">
-                                            <h1 className="text-3xl font-black text-center mb-12 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-8">
+                                        <div className="space-y-6 text-base">
+                                            <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
+                                            <table className="w-full border-collapse border border-black text-center mb-6">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{selectedEmp.realName}</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{decryptedSelectedName}</td></tr>
                                                     <tr><th className="border border-black bg-slate-100 p-2">총 발생일수</th><td className="border border-black p-2">{calculateStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-2">사용일수</th><td className="border border-black p-2">{calculateStatus(selectedEmp).used}일</td></tr>
                                                     <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
@@ -544,15 +572,25 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                                 만약, 10일 이내에 사용 시기를 통보하지 않을 경우 회사가 귀하의 휴가 사용 시기를 임의로 지정하여 통보할 수 있으며, 
                                                 그럼에도 불구하고 휴가를 사용하지 않아 소멸된 연차 휴가에 대해서는 <strong>금전적 보상의무가 면제됨</strong>을 알려드립니다.
                                             </p>
-                                            <div className="text-center mt-16 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-16 text-xl font-black">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center mt-8 font-bold text-lg">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            
+                                            {/* 본인 수령증 구역 (성명 삭제 및 자필 서명란) */}
+                                            <div className="border-2 border-dashed border-black p-4 mt-8 bg-slate-50">
+                                                <h3 className="font-bold text-center text-lg mb-3">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-sm mb-4 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
+                                                <div className="flex justify-between items-center text-sm px-8">
+                                                    <div>수령일자: {new Date().toLocaleDateString()}</div>
+                                                    <div>수령자(본인): <span className="inline-block w-40 border-b border-black text-center font-bold h-6"></span> (서명 또는 인)</div>
+                                                </div>
+                                            </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-8 text-base">
-                                            <h1 className="text-3xl font-black text-center mb-12 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-8">
+                                        <div className="space-y-6 text-base">
+                                            <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
+                                            <table className="w-full border-collapse border border-black text-center mb-6">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{selectedEmp.realName}</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{decryptedSelectedName}</td></tr>
                                                     <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
@@ -562,8 +600,18 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <p className="leading-relaxed">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
                                             </p>
-                                            <div className="text-center mt-16 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-16 text-xl font-black">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center mt-8 font-bold text-lg">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+
+                                            {/* 본인 수령증 구역 (성명 삭제 및 자필 서명란) */}
+                                            <div className="border-2 border-dashed border-black p-4 mt-8 bg-slate-50">
+                                                <h3 className="font-bold text-center text-lg mb-3">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-sm mb-4 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
+                                                <div className="flex justify-between items-center text-sm px-8">
+                                                    <div>수령일자: {new Date().toLocaleDateString()}</div>
+                                                    <div>수령자(본인): <span className="inline-block w-40 border-b border-black text-center font-bold h-6"></span> (서명 또는 인)</div>
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
                                 </div>
@@ -637,14 +685,15 @@ function AdminView() {
 
     const handleEmpSubmit = async (e) => {
         e.preventDefault();
+        const encryptedRealName = encryptName(empForm.name);
         const maskedName = maskName(empForm.name);
         try {
             if (editingEmpId) {
-                await setDoc(doc(db, publicPath, 'employees', editingEmpId), { ...empForm, name: maskedName, realName: empForm.name }, { merge: true });
+                await setDoc(doc(db, publicPath, 'employees', editingEmpId), { ...empForm, name: maskedName, realName: encryptedRealName }, { merge: true });
                 showToast('직원 정보가 수정되었습니다.');
             } else {
                 if (employees.find(emp => emp.empId === empForm.empId)) return showToast('이미 존재하는 사원번호입니다.', 'error');
-                await setDoc(doc(db, publicPath, 'employees', empForm.empId), { ...empForm, name: maskedName, realName: empForm.name });
+                await setDoc(doc(db, publicPath, 'employees', empForm.empId), { ...empForm, name: maskedName, realName: encryptedRealName });
                 showToast('신규 직원이 등록되었습니다.');
             }
             setEmpForm({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
@@ -681,9 +730,10 @@ function AdminView() {
         } catch(err) { showToast('등록 실패', 'error'); }
     };
 
+    // 일괄 영구 삭제 (오직 '발생' 데이터만 영구 삭제)
     const handleBulkDelete = () => {
         if (!delDate.start || !delDate.end) return showToast('삭제할 기간을 선택하세요.', 'error');
-        showConfirm(`정말 영구 일괄삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다.`, async () => {
+        showConfirm(`정말 일괄 영구삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다.`, async () => {
             try {
                 const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end && r.type === '발생');
                 for(let r of targets) {
@@ -708,7 +758,8 @@ function AdminView() {
 
     const filteredRecords = leaveRecords.filter(r => {
         if (filterDept && r.dept !== filterDept) return false;
-        if (filterName && r.realName !== filterName) return false;
+        const decryptedRecName = decryptName(r.realName);
+        if (filterName && decryptedRecName !== filterName) return false;
         return true;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -748,7 +799,7 @@ function AdminView() {
                             <form onSubmit={handleEmpSubmit} className="space-y-4 text-sm">
                                 <div><label className="block font-bold mb-1">사원번호</label><input required disabled={!!editingEmpId} type="text" value={empForm.empId} onChange={e => setEmpForm({ ...empForm, empId: e.target.value })} className="w-full border p-2 rounded disabled:bg-slate-200" placeholder="예: 2026001" /></div>
                                 <div><label className="block font-bold mb-1">부서명</label><select value={empForm.dept} onChange={e => setEmpForm({ ...empForm, dept: e.target.value })} className="w-full border p-2 rounded">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                                <div><label className="block font-bold mb-1">성명</label><input required type="text" value={empForm.name} onChange={e => setEmpForm({ ...empForm, name: e.target.value })} className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 마스킹)" /></div>
+                                <div><label className="block font-bold mb-1">성명</label><input required type="text" value={empForm.name} onChange={e => setEmpForm({ ...empForm, name: e.target.value })} className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 암호화)" /></div>
                                 {!editingEmpId && <div><label className="block font-bold mb-1">초기 비밀번호 (직원 접속용)</label><input type="text" value={empForm.pw} onChange={e => setEmpForm({ ...empForm, pw: e.target.value })} className="w-full border p-2 rounded" /></div>}
                                 <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={empForm.gender === '남성'} onChange={() => setEmpForm({ ...empForm, gender: '남성' })} /> 남성</label><label><input type="radio" checked={empForm.gender === '여성'} onChange={() => setEmpForm({ ...empForm, gender: '여성' })} /> 여성</label></div></div>
                                 <div><label className="block font-bold mb-1">입사일 (기준일)</label><input required type="date" value={empForm.joinDate} onChange={e => setEmpForm({ ...empForm, joinDate: e.target.value })} className="w-full border p-2 rounded" /></div>
@@ -761,17 +812,20 @@ function AdminView() {
                         </div>
                         <div className="w-2/3 border rounded overflow-hidden flex flex-col">
                             <table className="w-full text-sm text-center border-collapse">
-                                <thead className="bg-slate-100"><tr><th className="p-3 border-b">사원번호</th><th className="p-3 border-b">부서</th><th className="p-3 border-b">성명(실명)</th><th className="p-3 border-b">비밀번호</th><th className="p-3 border-b">입사일</th><th className="p-3 border-b">관리</th></tr></thead>
+                                <thead className="bg-slate-100"><tr><th className="p-3 border-b">사원번호</th><th className="p-3 border-b">부서</th><th className="p-3 border-b">성명(실명 복구)</th><th className="p-3 border-b">비밀번호</th><th className="p-3 border-b">입사일</th><th className="p-3 border-b">관리</th></tr></thead>
                                 <tbody className="divide-y overflow-auto h-full">
-                                    {employees.map((emp, i) => (
-                                        <tr key={`emp-${emp.empId}-${i}`} className="hover:bg-slate-50 transition-colors">
-                                            <td className="p-3">{emp.empId}</td><td className="p-3">{emp.dept}</td><td className="p-3 font-bold">{emp.realName}</td><td className="p-3 text-slate-400">{emp.pw}</td><td className="p-3">{emp.joinDate}</td>
-                                            <td className="p-3 space-x-1 whitespace-nowrap">
-                                                <button onClick={() => { setEditingEmpId(emp.empId); setEmpForm({ ...emp, name: emp.realName }); }} className="text-xs bg-slate-200 px-2 py-1.5 rounded font-bold hover:bg-slate-300">수정</button>
-                                                <button onClick={() => handleDeleteEmp(emp.empId)} className="text-xs bg-red-100 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-200">삭제</button>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {employees.map((emp, i) => {
+                                        const decryptedEmpName = decryptName(emp.realName);
+                                        return (
+                                            <tr key={`emp-${emp.empId}-${i}`} className="hover:bg-slate-50 transition-colors">
+                                                <td className="p-3">{emp.empId}</td><td className="p-3">{emp.dept}</td><td className="p-3 font-bold">{decryptedEmpName}</td><td className="p-3 text-slate-400">{emp.pw}</td><td className="p-3">{emp.joinDate}</td>
+                                                <td className="p-3 space-x-1 whitespace-nowrap">
+                                                    <button onClick={() => { setEditingEmpId(emp.empId); setEmpForm({ ...emp, name: decryptedEmpName }); }} className="text-xs bg-slate-200 px-2 py-1.5 rounded font-bold hover:bg-slate-300">수정</button>
+                                                    <button onClick={() => handleDeleteEmp(emp.empId)} className="text-xs bg-red-100 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-200">삭제</button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                     {employees.length === 0 && <tr><td colSpan="6" className="p-8 text-slate-400">등록된 직원이 없습니다.</td></tr>}
                                 </tbody>
                             </table>
@@ -789,12 +843,12 @@ function AdminView() {
                                 </select>
                                 <select className="border p-1.5 rounded w-32 bg-white" value={filterName} onChange={e => setFilterName(e.target.value)}>
                                     <option value="">전체 직원</option>
-                                    {employees.filter(e=>filterDept?e.dept===filterDept:true).map((e,i)=><option key={`filter-${e.empId}-${i}`} value={e.realName}>{e.realName}</option>)}
+                                    {employees.filter(e=>filterDept?e.dept===filterDept:true).map((e,i)=><option key={`filter-${e.empId}-${i}`} value={decryptName(e.realName)}>{decryptName(e.realName)}</option>)}
                                 </select>
                                 <div className="h-4 w-px bg-slate-300 mx-2 shrink-0"></div>
                                 <button onClick={() => {
                                     if(filterName) {
-                                        const e = employees.find(x=>x.realName===filterName && (!filterDept||x.dept===filterDept));
+                                        const e = employees.find(x=>decryptName(x.realName)===filterName && (!filterDept||x.dept===filterDept));
                                         if(e) { const s = getSummary(e.empId); setSummaryModal({emp:e, records:leaveRecords.filter(r=>r.empId===e.empId).sort((a,b)=>new Date(b.date)-new Date(a.date)), gen:s.gen, used:s.used}); }
                                     } else { showToast('개인 집계표를 보려면 왼쪽에서 특정 직원을 선택하세요.', 'error'); }
                                 }} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded shadow-sm border border-indigo-200 font-bold hover:bg-indigo-200 shrink-0">선택 직원 개인집계표</button>
@@ -804,7 +858,7 @@ function AdminView() {
                             
                             <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-slate-600 w-16 shrink-0">2. 신청</span>
-                                <select className="border p-1.5 rounded w-32 bg-white" value={proxyLeave.empId} onChange={e=>setProxyLeave({...proxyLeave, empId:e.target.value})}><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{e.realName}</option>)}</select>
+                                <select className="border p-1.5 rounded w-32 bg-white" value={proxyLeave.empId} onChange={e=>setProxyLeave({...proxyLeave, empId:e.target.value})}><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}</select>
                                 <input type="date" className="border p-1.5 rounded bg-white" value={proxyLeave.date} onChange={e=>setProxyLeave({...proxyLeave, date:e.target.value})}/>
                                 <select className="border p-1.5 rounded w-20 bg-white" value={proxyLeave.days} onChange={e=>setProxyLeave({...proxyLeave, days:e.target.value})}>{[0.5,1,2,3,4,5,6,7,8,9,10].map(d=><option key={d} value={d}>{d}일</option>)}</select>
                                 <input type="text" className="border p-1.5 rounded w-48 bg-white" placeholder="사유 (대리신청 기록됨)" value={proxyLeave.remark} onChange={e=>setProxyLeave({...proxyLeave, remark:e.target.value})}/>
@@ -816,7 +870,7 @@ function AdminView() {
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.start} onChange={e=>setDelDate({...delDate, start:e.target.value})}/> ~ 
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.end} onChange={e=>setDelDate({...delDate, end:e.target.value})}/>
                                 <button onClick={handleBulkDelete} className="bg-red-600 text-white px-4 py-1.5 rounded shadow-sm font-bold hover:bg-red-700 shrink-0">발생내역 일괄 영구삭제</button>
-                                <span className="text-xs font-normal text-slate-500">(지정 기간 내 '발생' 내역 영구 삭제)</span>
+                                <span className="text-xs font-normal text-slate-500">(지정 기간 내 '발생' 데이터만 영구 삭제 / '사용'은 영구삭제 불가)</span>
                             </div>
 
                             <div className="flex items-center gap-3 text-sm flex-nowrap overflow-x-auto whitespace-nowrap">
@@ -832,40 +886,44 @@ function AdminView() {
                             <table className="w-full text-sm text-left">
                                 <thead className="bg-slate-100 sticky top-0 z-10 shadow-sm"><tr><th className="p-3 border-b">일자</th><th className="p-3 border-b">부서</th><th className="p-3 border-b">성명</th><th className="p-3 border-b">구분</th><th className="p-3 border-b">일수</th><th className="p-3 border-b w-1/3">적요(비고/이력)</th><th className="p-3 border-b text-center">관리</th></tr></thead>
                                 <tbody className="divide-y bg-white">
-                                    {filteredRecords.map((r, i) => (
-                                        <tr key={`record-${r.id}-${i}`} className={`hover:bg-indigo-50 transition-colors ${editModeEnabled?'cursor-pointer':''}`} onClick={()=>editModeEnabled&&setEditingRecord(r)}>
-                                            <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':''}`}>{r.date}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
-                                            <td className="p-3">{r.dept}</td><td className="p-3 font-bold">{r.realName}</td>
-                                            <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type==='발생'?'bg-blue-50 text-blue-600':'bg-orange-50 text-orange-600'}`}>{r.type}</span>{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-2"></div>}</td>
-                                            <td className={`p-3 font-bold ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':(r.type==='사용'?'text-orange-600':'text-indigo-600')}`}>{r.isCanceled?0:(r.type==='사용'?'-':'')+r.days}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
-                                            <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
-                                            <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
-                                                {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
-                                                {/* 발생 데이터: 관리자 영구 삭제 가능 / 사용 데이터: 영구 삭제 불가, 오직 줄긋기 취소만 가능 */}
-                                                {r.type === '발생' ? (
-                                                    <button onClick={()=>{
-                                                        showConfirm('이 발생 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {
-                                                            try {
-                                                                await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
-                                                                showToast('영구 삭제되었습니다.');
-                                                            } catch(err) { showToast('삭제 오류', 'error'); }
-                                                        });
-                                                    }} className="block w-full text-xs bg-red-100 text-red-700 px-2 py-1.5 rounded border border-red-300 font-bold hover:bg-red-200 mt-1">영구 삭제</button>
-                                                ) : (
-                                                    !r.isCanceled && (
+                                    {filteredRecords.map((r, i) => {
+                                        const decryptedRecName = decryptName(r.realName);
+                                        return (
+                                            <tr key={`record-${r.id}-${i}`} className={`hover:bg-indigo-50 transition-colors ${editModeEnabled?'cursor-pointer':''}`} onClick={()=>editModeEnabled&&setEditingRecord(r)}>
+                                                <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':''}`}>{r.date}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
+                                                <td className="p-3">{r.dept}</td><td className="p-3 font-bold">{decryptedRecName}</td>
+                                                <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${r.type==='발생'?'bg-blue-50 text-blue-600':'bg-orange-50 text-orange-600'}`}>{r.type}</span>{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-2"></div>}</td>
+                                                <td className={`p-3 font-bold ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':(r.type==='사용'?'text-orange-600':'text-indigo-600')}`}>{r.isCanceled?0:(r.type==='사용'?'-':'')+r.days}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
+                                                <td className={`p-3 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}{editModeEnabled&&<div className="border-b border-dashed border-indigo-400 mt-1"></div>}</td>
+                                                <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
+                                                    {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
+                                                    
+                                                    {/* 발생 데이터: 관리자 영구 삭제 가능 / 사용 데이터: 영구 삭제 절대 불가, 오직 줄긋기 취소만 가능 */}
+                                                    {r.type === '발생' ? (
                                                         <button onClick={()=>{
-                                                            showConfirm('이 사용 내역을 취소(줄긋기) 처리하시겠습니까?', async () => {
+                                                            showConfirm('이 발생 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {
                                                                 try {
-                                                                    await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자취소]` });
-                                                                    showToast('취소 처리됨');
-                                                                } catch(err) { showToast('오류 발생', 'error'); }
+                                                                    await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
+                                                                    showToast('영구 삭제되었습니다.');
+                                                                } catch(err) { showToast('삭제 오류', 'error'); }
                                                             });
-                                                        }} className="block w-full text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50 mt-1">취소(줄긋기)</button>
-                                                    )
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))}
+                                                        }} className="block w-full text-xs bg-red-100 text-red-700 px-2 py-1.5 rounded border border-red-300 font-bold hover:bg-red-200 mt-1">영구 삭제</button>
+                                                    ) : (
+                                                        !r.isCanceled && (
+                                                            <button onClick={()=>{
+                                                                showConfirm('이 사용 내역을 취소(줄긋기) 처리하시겠습니까?', async () => {
+                                                                    try {
+                                                                        await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${new Date().toLocaleDateString()} 관리자취소]` });
+                                                                        showToast('취소 처리됨');
+                                                                    } catch(err) { showToast('오류 발생', 'error'); }
+                                                                });
+                                                            }} className="block w-full text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50 mt-1">취소(줄긋기)</button>
+                                                        )
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                     {filteredRecords.length===0 && <tr><td colSpan="7" className="p-8 text-center text-slate-400">조건에 맞는 내역이 없습니다.</td></tr>}
                                 </tbody>
                             </table>
@@ -921,7 +979,7 @@ function UserView() {
         const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         try {
             await setDoc(doc(db, publicPath, 'leaveRecords', newId), {
-                empId: user.empId, dept: user.dept, name: user.name, realName: user.realName,
+                empId: user.empId, dept: user.dept, name: user.name, realName: encryptName(user.realName),
                 date: applyDate, type: '사용', days: parseFloat(applyDays), remark: applyRemark, isCanceled: false,
                 history: `[${new Date().toLocaleDateString()} 본인신청]`
             });
@@ -933,13 +991,15 @@ function UserView() {
         }
     };
 
+    const decryptedUserRealName = decryptName(user.realName);
+
     return (
         <div className="max-w-[1000px] mx-auto p-4 flex flex-col h-screen">
             <PrintApplicationModal record={printModal} user={user} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
             <header className="flex justify-between items-center bg-white p-4 rounded-xl shadow mb-4">
                 <div className="flex items-center gap-2 font-black text-indigo-700 text-lg"><Icons.Calendar /> 연차 관리 시스템 (서버 연결됨)</div>
                 <div className="flex items-center gap-4 text-sm">
-                    <span className="font-bold">{user.dept} {user.realName}님 환영합니다</span>
+                    <span className="font-bold">{user.dept} {decryptedUserRealName}님 환영합니다</span>
                     <button onClick={() => setUser(null)} className="flex items-center gap-1 text-slate-500 hover:text-slate-800"><Icons.LogOut /> 로그아웃</button>
                 </div>
             </header>

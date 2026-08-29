@@ -43,7 +43,8 @@ const addYearsExact = (dateStr, years) => {
     return `${y + years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 };
 
-const ENCRYPT_KEY = "LEAVE_APP_SECURE_KEY_2026";
+// 🔒 성명 암호화 및 복구 유틸리티 (DB에는 암호화 저장, UI/출력 시 복구)
+const ENCRYPT_KEY = "LEAVE_APP_SECURE_2026";
 const encryptName = (name) => {
     if (!name) return "";
     try {
@@ -62,15 +63,16 @@ const decryptName = (encoded) => {
         }
         return encoded;
     } catch (e) {
-        return encoded; // 평문인 경우 그대로 반환
+        // 이미 평문이거나 다른 포맷인 경우 그대로 반환
+        return encoded;
     }
 };
 
 const maskName = (name) => {
-    const actual = decryptName(name);
-    if (!actual || actual.length < 2) return actual;
-    if (actual.length === 2) return actual[0] + '*';
-    return actual[0] + '*'.repeat(actual.length - 2) + actual[actual.length - 1];
+    const actualName = decryptName(name);
+    if (!actualName || actualName.length < 2) return actualName;
+    if (actualName.length === 2) return actualName[0] + '*';
+    return actualName[0] + '*'.repeat(actualName.length - 2) + actualName[actualName.length - 1];
 };
 
 const exportCSV = (data, filename) => {
@@ -166,12 +168,13 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
+    // 🕒 매일 자정(24시) 4년 전 데이터 자동 영구 삭제 백그라운드 타이머 및 최초 접속 실행
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0) return;
 
-        const purgeFourYearOldData = async () => {
+        const checkAndPurgeFourYearOldData = async () => {
             const currentYear = new Date().getFullYear();
-            const cutoffYear = currentYear - 4; // 예: 2026년 기준 2022년 이전 데이터 삭제
+            const cutoffYear = currentYear - 4; // 4년 전 기준년도 (예: 2026년 기준 2022년 이전 데이터 삭제)
 
             try {
                 for (const rec of leaveRecords) {
@@ -186,13 +189,13 @@ export default function AnnualLeaveApp() {
             }
         };
 
-        purgeFourYearOldData();
+        checkAndPurgeFourYearOldData();
 
         const scheduleMidnightCheck = () => {
             const now = new Date();
             const millisTillMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0) - now;
             return setTimeout(() => {
-                purgeFourYearOldData();
+                checkAndPurgeFourYearOldData();
                 scheduleMidnightCheck();
             }, millisTillMidnight);
         };
@@ -555,7 +558,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                 </div>
                                 <div className="flex-1 p-12 overflow-auto" id="print-area">
                                     {docType === '촉구서' ? (
-                                        <div className="space-y-6 text-base">
+                                        <div className="space-y-6 text-base flex flex-col h-full">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6">
                                                 <tbody>
@@ -575,18 +578,27 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <div className="text-center mt-8 font-bold text-lg">{new Date().toLocaleDateString()}</div>
                                             <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
                                             
-                                            {/* 본인 수령증 구역 (성명 삭제 및 자필 서명란) */}
-                                            <div className="border-2 border-dashed border-black p-4 mt-8 bg-slate-50">
-                                                <h3 className="font-bold text-center text-lg mb-3">[ 본 인 수 령 증 ]</h3>
-                                                <p className="text-sm mb-4 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
-                                                <div className="flex justify-between items-center text-sm px-8">
-                                                    <div>수령일자: {new Date().toLocaleDateString()}</div>
-                                                    <div>수령자(본인): <span className="inline-block w-40 border-b border-black text-center font-bold h-6"></span> (서명 또는 인)</div>
+                                            {/* 본인 수령증 구역 (하단 고정 및 공란/두 줄 배치) */}
+                                            <div className="border-2 border-dashed border-black p-6 mt-auto bg-slate-50 w-full text-left">
+                                                <h3 className="font-bold text-center text-lg mb-4">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-sm mb-6 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
+                                                <div className="flex flex-col gap-6 text-base px-4">
+                                                    <div className="flex items-end">
+                                                        <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
+                                                        <span className="flex-1 border-b border-black h-6"></span>
+                                                    </div>
+                                                    <div className="flex items-end justify-between w-full">
+                                                        <div className="flex items-end flex-1">
+                                                            <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
+                                                            <span className="flex-1 border-b border-black h-6 min-w-[150px]"></span>
+                                                        </div>
+                                                        <span className="whitespace-nowrap ml-4">(서명 또는 인)</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-6 text-base">
+                                        <div className="space-y-6 text-base flex flex-col h-full">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6">
                                                 <tbody>
@@ -603,13 +615,22 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <div className="text-center mt-8 font-bold text-lg">{new Date().toLocaleDateString()}</div>
                                             <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 
-                                            {/* 본인 수령증 구역 (성명 삭제 및 자필 서명란) */}
-                                            <div className="border-2 border-dashed border-black p-4 mt-8 bg-slate-50">
-                                                <h3 className="font-bold text-center text-lg mb-3">[ 본 인 수 령 증 ]</h3>
-                                                <p className="text-sm mb-4 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
-                                                <div className="flex justify-between items-center text-sm px-8">
-                                                    <div>수령일자: {new Date().toLocaleDateString()}</div>
-                                                    <div>수령자(본인): <span className="inline-block w-40 border-b border-black text-center font-bold h-6"></span> (서명 또는 인)</div>
+                                            {/* 본인 수령증 구역 (하단 고정 및 공란/두 줄 배치) */}
+                                            <div className="border-2 border-dashed border-black p-6 mt-auto bg-slate-50 w-full text-left">
+                                                <h3 className="font-bold text-center text-lg mb-4">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-sm mb-6 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
+                                                <div className="flex flex-col gap-6 text-base px-4">
+                                                    <div className="flex items-end">
+                                                        <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
+                                                        <span className="flex-1 border-b border-black h-6"></span>
+                                                    </div>
+                                                    <div className="flex items-end justify-between w-full">
+                                                        <div className="flex items-end flex-1">
+                                                            <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
+                                                            <span className="flex-1 border-b border-black h-6 min-w-[150px]"></span>
+                                                        </div>
+                                                        <span className="whitespace-nowrap ml-4">(서명 또는 인)</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>
@@ -620,7 +641,22 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                     </div>
                 </div>
             </div>
-             <style>{`@media print { @page { size: A4 portrait; margin: 15mm; } body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100vw; } }`}</style>
+             <style>{`
+                 @media print { 
+                     @page { size: A4 portrait; margin: 15mm; } 
+                     body * { visibility: hidden; } 
+                     #print-area, #print-area * { visibility: visible; } 
+                     #print-area { 
+                         position: absolute; 
+                         left: 0; 
+                         top: 0; 
+                         width: 210mm; /* A4 width */
+                         height: 297mm; /* A4 height */
+                         box-sizing: border-box;
+                         padding-bottom: 20mm; /* Add some padding at the bottom */
+                     } 
+                 }
+             `}</style>
         </div>
     );
 };
@@ -898,7 +934,7 @@ function AdminView() {
                                                 <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                                                     {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
                                                     
-                                                    {/* 발생 데이터: 관리자 영구 삭제 가능 / 사용 데이터: 영구 삭제 절대 불가, 오직 줄긋기 취소만 가능 */}
+                                                    {/* 발생 데이터: 관리자 영구 삭제 가능 / 사용 데이터: 영구 삭제 불가, 오직 줄긋기 취소만 가능 */}
                                                     {r.type === '발생' ? (
                                                         <button onClick={()=>{
                                                             showConfirm('이 발생 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {

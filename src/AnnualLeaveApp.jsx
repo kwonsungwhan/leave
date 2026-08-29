@@ -63,7 +63,6 @@ const decryptName = (encoded) => {
         }
         return encoded;
     } catch (e) {
-        // 이미 평문이거나 다른 포맷인 경우 그대로 반환
         return encoded;
     }
 };
@@ -168,19 +167,20 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
-    // 🕒 매일 자정(24시) 4년 전 데이터 자동 영구 삭제 백그라운드 타이머 및 최초 접속 실행
+    // 🕒 매일 자정(24시) 및 최초 접속 시 4년 초과 데이터 강제 영구 삭제
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0) return;
 
         const checkAndPurgeFourYearOldData = async () => {
             const currentYear = new Date().getFullYear();
-            const cutoffYear = currentYear - 4; // 4년 전 기준년도 (예: 2026년 기준 2022년 이전 데이터 삭제)
+            const cutoffYear = currentYear - 4; 
 
             try {
                 for (const rec of leaveRecords) {
                     if (!rec.date) continue;
                     const recYear = parseInt(rec.date.split('-')[0], 10);
-                    if (recYear <= cutoffYear) {
+                    // 4년 초과(현재 연도 - 4년 보다 작거나 같은 연도) 데이터이고, '발생' 데이터만 안전하게 영구삭제
+                    if (recYear <= cutoffYear && rec.type === '발생') {
                         await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
                     }
                 }
@@ -378,7 +378,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         <button onClick={onClose} className="text-slate-500 p-2 hover:bg-slate-200 rounded"><Icons.X /></button>
                     </div>
                 </div>
-                <div className="p-12 overflow-auto bg-white print:p-[20mm] print:w-[210mm] print:h-[297mm] print:mx-auto print:box-border" id="print-area">
+                <div className="p-12 overflow-auto bg-white" id="print-area">
                     <h1 className="text-3xl font-black text-center mb-8 tracking-widest decoration-4 underline underline-offset-8">휴가 신청서</h1>
                     <div className="flex justify-between items-end mb-6">
                         <div className="text-sm">문서번호: AL-{record.date.replace(/-/g, '')}-{record.id.substring(record.id.length-4).toUpperCase()}<br/>출력일자: {new Date().toLocaleDateString()}</div>
@@ -414,16 +414,14 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
             </div>
             <style>{`
                 @media print {
-                    @page { size: A4 portrait; margin: 0; }
+                    @page { size: auto; margin: 15mm; }
                     body * { visibility: hidden; }
                     #print-area, #print-area * { visibility: visible; }
                     #print-area {
-                        position: fixed;
+                        position: absolute;
                         left: 0;
                         top: 0;
-                        width: 210mm;
-                        height: 297mm;
-                        padding: 20mm;
+                        width: 100%;
                         box-sizing: border-box;
                         background: white;
                     }
@@ -474,7 +472,14 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                     </table>
                 </div>
             </div>
-             <style>{`@media print { @page { size: A4 portrait; margin: 15mm; } body * { visibility: hidden; } #print-area, #print-area * { visibility: visible; } #print-area { position: absolute; left: 0; top: 0; width: 100vw; } }`}</style>
+            <style>{`
+                @media print { 
+                    @page { size: auto; margin: 15mm; } 
+                    body * { visibility: hidden; } 
+                    #print-area, #print-area * { visibility: visible; } 
+                    #print-area { position: absolute; left: 0; top: 0; width: 100%; box-sizing: border-box; } 
+                }
+            `}</style>
         </div>
     );
 };
@@ -558,78 +563,74 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                 </div>
                                 <div className="flex-1 p-12 overflow-auto" id="print-area">
                                     {docType === '촉구서' ? (
-                                        <div className="space-y-6 text-base flex flex-col h-full">
+                                        <div className="space-y-8 text-base flex flex-col h-full text-slate-900">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-6">
+                                            <table className="w-full border-collapse border border-black text-center mb-6 text-lg">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{decryptedSelectedName}</td></tr>
-                                                    <tr><th className="border border-black bg-slate-100 p-2">총 발생일수</th><td className="border border-black p-2">{calculateStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-2">사용일수</th><td className="border border-black p-2">{calculateStatus(selectedEmp).used}일</td></tr>
-                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-3 w-1/4">부서</th><td className="border border-black p-3">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-3 w-1/4">성명</th><td className="border border-black p-3 font-bold">{decryptedSelectedName}</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-3">총 발생일수</th><td className="border border-black p-3">{calculateStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-3">사용일수</th><td className="border border-black p-3">{calculateStatus(selectedEmp).used}일</td></tr>
+                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-3 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-3 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
-                                            <p className="leading-relaxed">
+                                            <p className="leading-relaxed text-justify mt-4">
                                                 「근로기준법 제61조」에 의거하여, 귀하의 미사용 연차 유급휴가 일수를 위와 같이 통지하오니, 
                                                 본 통지서를 수령한 날로부터 <strong>10일 이내</strong>에 미사용 연차 유급휴가의 사용 시기를 정하여 회사에 서면으로 통보하여 주시기 바랍니다.
                                             </p>
-                                            <p className="leading-relaxed">
+                                            <p className="leading-relaxed text-justify">
                                                 만약, 10일 이내에 사용 시기를 통보하지 않을 경우 회사가 귀하의 휴가 사용 시기를 임의로 지정하여 통보할 수 있으며, 
                                                 그럼에도 불구하고 휴가를 사용하지 않아 소멸된 연차 휴가에 대해서는 <strong>금전적 보상의무가 면제됨</strong>을 알려드립니다.
                                             </p>
-                                            <div className="text-center mt-8 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center mt-12 font-bold text-lg">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
                                             
-                                            {/* 본인 수령증 구역 (하단 고정 및 공란/두 줄 배치) */}
-                                            <div className="border-2 border-dashed border-black p-6 mt-auto bg-slate-50 w-full text-left">
-                                                <h3 className="font-bold text-center text-lg mb-4">[ 본 인 수 령 증 ]</h3>
-                                                <p className="text-sm mb-6 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
-                                                <div className="flex flex-col gap-6 text-base px-4">
+                                            {/* 본인 수령증 구역 (세로 분리 및 폭 100% 최적화) */}
+                                            <div className="border-2 border-dashed border-black p-8 mt-auto bg-slate-50 w-full text-left">
+                                                <h3 className="font-bold text-center text-xl mb-6">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-base mb-8 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
+                                                <div className="flex flex-col gap-8 text-lg px-8">
                                                     <div className="flex items-end">
-                                                        <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
+                                                        <span className="w-28 whitespace-nowrap font-bold">수령일자 :</span>
                                                         <span className="flex-1 border-b border-black h-6"></span>
                                                     </div>
-                                                    <div className="flex items-end justify-between w-full">
-                                                        <div className="flex items-end flex-1">
-                                                            <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
-                                                            <span className="flex-1 border-b border-black h-6 min-w-[150px]"></span>
-                                                        </div>
-                                                        <span className="whitespace-nowrap ml-4">(서명 또는 인)</span>
+                                                    <div className="flex items-end w-full">
+                                                        <span className="w-28 whitespace-nowrap font-bold">수령자(본인) :</span>
+                                                        <span className="flex-1 border-b border-black h-6"></span>
+                                                        <span className="whitespace-nowrap ml-4 text-sm text-slate-600">(서명 또는 인)</span>
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-6 text-base flex flex-col h-full">
+                                        <div className="space-y-8 text-base flex flex-col h-full text-slate-900">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-6">
+                                            <table className="w-full border-collapse border border-black text-center mb-6 text-lg">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{decryptedSelectedName}</td></tr>
-                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-3 w-1/4">부서</th><td className="border border-black p-3">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-3 w-1/4">성명</th><td className="border border-black p-3 font-bold">{decryptedSelectedName}</td></tr>
+                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-3 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-3 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
-                                            <p className="leading-relaxed">
+                                            <p className="leading-relaxed text-justify mt-4">
                                                 귀원은 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
                                             </p>
-                                            <p className="leading-relaxed">
+                                            <p className="leading-relaxed text-justify">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
                                             </p>
-                                            <div className="text-center mt-8 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center mt-12 font-bold text-lg">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 
-                                            {/* 본인 수령증 구역 (하단 고정 및 공란/두 줄 배치) */}
-                                            <div className="border-2 border-dashed border-black p-6 mt-auto bg-slate-50 w-full text-left">
-                                                <h3 className="font-bold text-center text-lg mb-4">[ 본 인 수 령 증 ]</h3>
-                                                <p className="text-sm mb-6 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
-                                                <div className="flex flex-col gap-6 text-base px-4">
+                                            {/* 본인 수령증 구역 (세로 분리 및 폭 100% 최적화) */}
+                                            <div className="border-2 border-dashed border-black p-8 mt-auto bg-slate-50 w-full text-left">
+                                                <h3 className="font-bold text-center text-xl mb-6">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-base mb-8 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
+                                                <div className="flex flex-col gap-8 text-lg px-8">
                                                     <div className="flex items-end">
-                                                        <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
+                                                        <span className="w-28 whitespace-nowrap font-bold">수령일자 :</span>
                                                         <span className="flex-1 border-b border-black h-6"></span>
                                                     </div>
-                                                    <div className="flex items-end justify-between w-full">
-                                                        <div className="flex items-end flex-1">
-                                                            <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
-                                                            <span className="flex-1 border-b border-black h-6 min-w-[150px]"></span>
-                                                        </div>
-                                                        <span className="whitespace-nowrap ml-4">(서명 또는 인)</span>
+                                                    <div className="flex items-end w-full">
+                                                        <span className="w-28 whitespace-nowrap font-bold">수령자(본인) :</span>
+                                                        <span className="flex-1 border-b border-black h-6"></span>
+                                                        <span className="whitespace-nowrap ml-4 text-sm text-slate-600">(서명 또는 인)</span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -641,22 +642,20 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                     </div>
                 </div>
             </div>
-             <style>{`
+            <style>{`
                  @media print { 
-                     @page { size: A4 portrait; margin: 15mm; } 
+                     @page { size: auto; margin: 15mm; } 
                      body * { visibility: hidden; } 
                      #print-area, #print-area * { visibility: visible; } 
                      #print-area { 
                          position: absolute; 
                          left: 0; 
                          top: 0; 
-                         width: 210mm; /* A4 width */
-                         height: 297mm; /* A4 height */
+                         width: 100%; 
                          box-sizing: border-box;
-                         padding-bottom: 20mm; /* Add some padding at the bottom */
                      } 
                  }
-             `}</style>
+            `}</style>
         </div>
     );
 };
@@ -769,7 +768,7 @@ function AdminView() {
     // 일괄 영구 삭제 (오직 '발생' 데이터만 영구 삭제)
     const handleBulkDelete = () => {
         if (!delDate.start || !delDate.end) return showToast('삭제할 기간을 선택하세요.', 'error');
-        showConfirm(`정말 일괄 영구삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다.`, async () => {
+        showConfirm(`정말 일괄 영구삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다. (사용 데이터 제외)`, async () => {
             try {
                 const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end && r.type === '발생');
                 for(let r of targets) {
@@ -906,7 +905,7 @@ function AdminView() {
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.start} onChange={e=>setDelDate({...delDate, start:e.target.value})}/> ~ 
                                 <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.end} onChange={e=>setDelDate({...delDate, end:e.target.value})}/>
                                 <button onClick={handleBulkDelete} className="bg-red-600 text-white px-4 py-1.5 rounded shadow-sm font-bold hover:bg-red-700 shrink-0">발생내역 일괄 영구삭제</button>
-                                <span className="text-xs font-normal text-slate-500">(지정 기간 내 '발생' 데이터만 영구 삭제 / '사용'은 영구삭제 불가)</span>
+                                <span className="text-xs font-normal text-slate-500">(지정 기간 내 '발생' 데이터만 영구 삭제 / '사용' 데이터는 삭제불가)</span>
                             </div>
 
                             <div className="flex items-center gap-3 text-sm flex-nowrap overflow-x-auto whitespace-nowrap">
@@ -934,7 +933,6 @@ function AdminView() {
                                                 <td className="p-3 text-center space-y-1 whitespace-nowrap" onClick={e=>e.stopPropagation()}>
                                                     {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
                                                     
-                                                    {/* 발생 데이터: 관리자 영구 삭제 가능 / 사용 데이터: 영구 삭제 불가, 오직 줄긋기 취소만 가능 */}
                                                     {r.type === '발생' ? (
                                                         <button onClick={()=>{
                                                             showConfirm('이 발생 기록을 데이터베이스에서 완전히 영구 삭제하시겠습니까?', async () => {

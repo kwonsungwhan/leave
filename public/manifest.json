@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "휴가관리",
+  "name": "휴가관리 시스템",
   "icons": [
     {
       "src": "favicon.ico",

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
@@ -103,7 +103,7 @@ const exportCSV = (data, filename) => {
 const Toast = ({ message, type = 'success' }) => {
     if (!message) return null;
     return (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] animate-in fade-in slide-in-from-top-4 duration-300 print:hidden">
             <div className={`px-6 py-3 rounded-full shadow-lg text-sm font-bold flex items-center gap-2 ${type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-800 text-white'}`}>
                 <Icons.AlertCircle /> {message}
             </div>
@@ -114,7 +114,7 @@ const Toast = ({ message, type = 'success' }) => {
 const ConfirmDialog = ({ open, message, onConfirm, onCancel }) => {
     if (!open) return null;
     return (
-        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[10000] p-4">
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[10000] p-4 print:hidden">
             <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm text-center animate-in zoom-in-95 duration-200">
                 <div className="text-red-500 mb-4 flex justify-center"><Icons.AlertCircle /></div>
                 <h3 className="font-bold text-lg mb-6 text-slate-800 whitespace-pre-line">{message}</h3>
@@ -248,12 +248,12 @@ export default function AnnualLeaveApp() {
 
     return (
         <AppContext.Provider value={ctx}>
-            <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+            <div className="min-h-screen bg-slate-50 font-sans text-slate-800 print:bg-white print:min-h-0">
                 <Toast message={toastMsg.text} type={toastMsg.type} />
                 <ConfirmDialog open={confirmState.open} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={() => setConfirmState({...confirmState, open: false})} />
                 
-                {/* 메인 앱 영역 (인쇄 시 완벽하게 숨김 처리하여 백지 방지) */}
-                <div className="print:hidden h-full">
+                {/* 껍데기에서 print:hidden 삭제. 내부 UI 구성요소에만 개별 적용됨 */}
+                <div className="h-full print:h-auto">
                     {!user ? <LoginView /> : user.role === 'admin' ? <AdminView /> : <UserView />}
                 </div>
             </div>
@@ -262,28 +262,31 @@ export default function AnnualLeaveApp() {
 }
 
 // --------------------------------------------------------
-// 폼 컴포넌트 (모바일 한글 입력 버그 100% 방어)
+// 폼 컴포넌트 (비제어 컴포넌트 useRef 완벽 적용)
 // --------------------------------------------------------
 function LoginView() {
     const { setUser, departments, employees, adminPassword, showToast } = useContext(AppContext);
     const [mode, setMode] = useState('user');
     const [dept, setDept] = useState('');
     
-    // 모바일 키보드 IME 충돌 방지를 위해 일반 useState와 완벽한 방어 속성 사용
-    const [inputName, setInputName] = useState('');
-    const [inputPw, setInputPw] = useState('');
+    // 모바일 렉 방지를 위한 비제어(Uncontrolled) useRef 적용
+    const nameRef = useRef(null);
+    const pwRef = useRef(null);
 
     useEffect(() => { if (!dept && departments.length > 0) setDept(departments[0]); }, [departments]);
 
     const handleLogin = (e) => {
         e.preventDefault();
+        const inputName = nameRef.current?.value.trim() || '';
+        const inputPw = pwRef.current?.value || '';
+
         if (mode === 'admin') {
             if (inputPw === adminPassword) {
                 setUser({ role: 'admin', name: '관리자' });
                 showToast('관리자로 로그인했습니다.');
             } else showToast('비밀번호가 틀렸습니다.', 'error');
         } else {
-            const emp = employees.find(e => e.dept === dept && decryptName(e.realName) === inputName.trim());
+            const emp = employees.find(e => e.dept === dept && decryptName(e.realName) === inputName);
             if (emp && inputPw === emp.pw) {
                 setUser({ role: 'user', ...emp, realName: decryptName(emp.realName) });
                 showToast(`${maskName(emp.realName)}님 환영합니다.`);
@@ -310,8 +313,7 @@ function LoginView() {
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1">성명</label>
-                                {/* 모바일 한글 씹힘 방지 4종 세트 적용 */}
-                                <input required type="text" value={inputName} onChange={e => setInputName(e.target.value)}
+                                <input required type="text" ref={nameRef} defaultValue=""
                                     autoComplete="off" autoCorrect="off" spellCheck="false" autoCapitalize="off"
                                     className="w-full p-3 border rounded bg-white focus:border-indigo-500 outline-none" placeholder="본명 입력" />
                             </div>
@@ -319,7 +321,7 @@ function LoginView() {
                     )}
                     <div>
                         <label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 {mode === 'user' && <span className="text-slate-400 font-normal">(초기: 1234)</span>}</label>
-                        <input required type="password" value={inputPw} onChange={e => setInputPw(e.target.value)}
+                        <input required type="password" ref={pwRef} defaultValue=""
                             autoComplete="off" autoCorrect="off" spellCheck="false" autoCapitalize="off"
                             className="w-full p-3 border rounded bg-white focus:border-indigo-500 outline-none" />
                     </div>
@@ -328,7 +330,9 @@ function LoginView() {
                 <div className="absolute bottom-6 right-6">
                     <button type="button" onClick={() => { 
                         setMode(mode === 'admin' ? 'user' : 'admin'); 
-                        setInputName(''); setInputPw(''); setDept(departments[0]||''); 
+                        if(nameRef.current) nameRef.current.value = '';
+                        if(pwRef.current) pwRef.current.value = '';
+                        setDept(departments[0]||''); 
                     }} className="text-xs text-slate-300 hover:text-slate-500 font-medium transition-colors">{mode === 'admin' ? '직원 접속' : '관리자 접속'}</button>
                 </div>
             </div>
@@ -339,12 +343,14 @@ function LoginView() {
 const UserApplyForm = ({ onSubmit }) => {
     const [applyDate, setApplyDate] = useState('');
     const [applyDays, setApplyDays] = useState(1);
-    const [applyRemark, setApplyRemark] = useState('');
+    const remarkRef = useRef(null);
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSubmit({ applyDate, applyDays, applyRemark });
-        setApplyDate(''); setApplyDays(1); setApplyRemark('');
+        onSubmit({ applyDate, applyDays, applyRemark: remarkRef.current?.value || '' });
+        setApplyDate(''); 
+        setApplyDays(1); 
+        if(remarkRef.current) remarkRef.current.value = '';
     };
 
     return (
@@ -356,7 +362,7 @@ const UserApplyForm = ({ onSubmit }) => {
                 <div><label className="block font-bold mb-1">사용 기간</label><select value={applyDays} onChange={e => setApplyDays(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50">{[0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => <option key={`day-${d}`} value={d}>{d}일간</option>)}</select></div>
                 <div>
                     <label className="block font-bold mb-1">사유/적요</label>
-                    <input type="text" value={applyRemark} onChange={e => setApplyRemark(e.target.value)}
+                    <input type="text" ref={remarkRef} defaultValue=""
                         autoComplete="off" autoCorrect="off" spellCheck="false" autoCapitalize="off"
                         className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" />
                 </div>
@@ -367,29 +373,58 @@ const UserApplyForm = ({ onSubmit }) => {
 };
 
 const AdminEmployeeForm = ({ departments, editingEmp, onSave, onCancel }) => {
-    const [form, setForm] = useState({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
+    const [dept, setDept] = useState(departments[0] || '');
+    const [gender, setGender] = useState('남성');
+    const [joinDate, setJoinDate] = useState('');
+    
+    const empIdRef = useRef(null);
+    const nameRef = useRef(null);
+    const pwRef = useRef(null);
+    const remarkRef = useRef(null);
 
     useEffect(() => {
-        if (editingEmp) setForm({ ...editingEmp, name: decryptName(editingEmp.realName) });
-        else setForm({ empId: '', dept: departments[0] || '', name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' });
+        if (editingEmp) {
+            setDept(editingEmp.dept);
+            setGender(editingEmp.gender);
+            setJoinDate(editingEmp.joinDate);
+            if(empIdRef.current) empIdRef.current.value = editingEmp.empId;
+            if(nameRef.current) nameRef.current.value = decryptName(editingEmp.realName);
+            if(remarkRef.current) remarkRef.current.value = editingEmp.remark || '';
+        } else {
+            setDept(departments[0] || '');
+            setGender('남성');
+            setJoinDate('');
+            if(empIdRef.current) empIdRef.current.value = '';
+            if(nameRef.current) nameRef.current.value = '';
+            if(pwRef.current) pwRef.current.value = '1234';
+            if(remarkRef.current) remarkRef.current.value = '';
+        }
     }, [editingEmp, departments]);
 
     const handleSubmit = (e) => {
         e.preventDefault();
-        onSave(form);
+        onSave({
+            empId: empIdRef.current.value,
+            dept,
+            name: nameRef.current.value,
+            pw: pwRef.current ? pwRef.current.value : editingEmp.pw,
+            gender,
+            joinDate,
+            remark: remarkRef.current?.value || ''
+        });
     };
 
     return (
         <div className="w-full lg:w-1/3 bg-slate-50 p-4 md:p-6 rounded border overflow-auto shrink-0 max-h-96 lg:max-h-none">
             <h2 className="text-lg font-bold mb-4">{editingEmp ? '직원 정보 수정' : '신규 직원 등록'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4 text-sm">
-                <div><label className="block font-bold mb-1">사원번호</label><input required disabled={!!editingEmp} type="text" value={form.empId} onChange={e => setForm({...form, empId: e.target.value})} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded disabled:bg-slate-200" placeholder="예: 2026001" /></div>
-                <div><label className="block font-bold mb-1">부서명</label><select value={form.dept} onChange={e => setForm({...form, dept: e.target.value})} className="w-full border p-2 rounded">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                <div><label className="block font-bold mb-1">성명</label><input required type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} autoComplete="off" autoCorrect="off" spellCheck="false" className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 암호화)" /></div>
-                {!editingEmp && <div><label className="block font-bold mb-1">초기 비밀번호</label><input type="text" value={form.pw} onChange={e => setForm({...form, pw: e.target.value})} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded" /></div>}
-                <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={form.gender === '남성'} onChange={() => setForm({...form, gender: '남성'})} /> 남성</label><label><input type="radio" checked={form.gender === '여성'} onChange={() => setForm({...form, gender: '여성'})} /> 여성</label></div></div>
-                <div><label className="block font-bold mb-1">입사일 (기준일)</label><input required type="date" value={form.joinDate} onChange={e => setForm({...form, joinDate: e.target.value})} className="w-full border p-2 rounded" /></div>
-                <div><label className="block font-bold mb-1">비고</label><input type="text" value={form.remark} onChange={e => setForm({...form, remark: e.target.value})} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded" /></div>
+                <div><label className="block font-bold mb-1">사원번호</label><input required disabled={!!editingEmp} type="text" ref={empIdRef} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded disabled:bg-slate-200" placeholder="예: 2026001" /></div>
+                <div><label className="block font-bold mb-1">부서명</label><select value={dept} onChange={e => setDept(e.target.value)} className="w-full border p-2 rounded">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+                <div><label className="block font-bold mb-1">성명</label><input required type="text" ref={nameRef} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 암호화)" /></div>
+                {!editingEmp && <div><label className="block font-bold mb-1">초기 비밀번호</label><input type="text" ref={pwRef} defaultValue="1234" autoComplete="off" spellCheck="false" className="w-full border p-2 rounded" /></div>}
+                <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={gender === '남성'} onChange={() => setGender('남성')} /> 남성</label><label><input type="radio" checked={gender === '여성'} onChange={() => setGender('여성')} /> 여성</label></div></div>
+                <div><label className="block font-bold mb-1">입사일 (기준일)</label><input required type="date" value={joinDate} onChange={e => setJoinDate(e.target.value)} className="w-full border p-2 rounded" /></div>
+                <div><label className="block font-bold mb-1">비고</label><input type="text" ref={remarkRef} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded" /></div>
                 <div className="flex gap-2 pt-2">
                     {editingEmp && <button type="button" onClick={onCancel} className="flex-1 bg-slate-300 text-slate-700 py-2.5 rounded font-bold hover:bg-slate-400 transition">취소</button>}
                     <button type="submit" className="flex-1 bg-indigo-600 text-white py-2.5 rounded font-bold hover:bg-indigo-700 transition">{editingEmp ? '수정하기' : '등록하기'}</button>
@@ -400,46 +435,69 @@ const AdminEmployeeForm = ({ departments, editingEmp, onSave, onCancel }) => {
 };
 
 const AdminProxyLeaveForm = ({ employees, onSubmit }) => {
-    const [form, setForm] = useState({ empId: '', date: '', days: 1, remark: '' });
+    const [empId, setEmpId] = useState('');
+    const [date, setDate] = useState('');
+    const [days, setDays] = useState(1);
+    const remarkRef = useRef(null);
+
+    const handleSubmit = () => {
+        onSubmit({ empId, date, days, remark: remarkRef.current?.value || '' });
+        setEmpId(''); setDate(''); setDays(1);
+        if(remarkRef.current) remarkRef.current.value = '';
+    }
+
     return (
         <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
             <span className="font-bold text-slate-600 shrink-0">2. 신청</span>
-            <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={form.empId} onChange={e=>setForm({...form, empId:e.target.value})}><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}</select>
-            <input type="date" className="border p-1.5 rounded bg-white" value={form.date} onChange={e=>setForm({...form, date:e.target.value})}/>
-            <select className="border p-1.5 rounded w-20 bg-white" value={form.days} onChange={e=>setForm({...form, days:e.target.value})}>{[0.5,1,2,3,4,5,6,7,8,9,10].map(d=><option key={d} value={d}>{d}일</option>)}</select>
-            <input type="text" className="border p-1.5 rounded w-32 md:w-48 bg-white" placeholder="사유 (대리신청)" value={form.remark} onChange={e=>setForm({...form, remark:e.target.value})} autoComplete="off" spellCheck="false" />
-            <button onClick={() => { onSubmit(form); setForm({ empId: '', date: '', days: 1, remark: '' }); }} className="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-indigo-700 shrink-0">등록</button>
+            <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={empId} onChange={e=>setEmpId(e.target.value)}><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}</select>
+            <input type="date" className="border p-1.5 rounded bg-white" value={date} onChange={e=>setDate(e.target.value)}/>
+            <select className="border p-1.5 rounded w-20 bg-white" value={days} onChange={e=>setDays(e.target.value)}>{[0.5,1,2,3,4,5,6,7,8,9,10].map(d=><option key={d} value={d}>{d}일</option>)}</select>
+            <input type="text" className="border p-1.5 rounded w-32 md:w-48 bg-white" placeholder="사유 (대리신청)" ref={remarkRef} autoComplete="off" spellCheck="false" />
+            <button onClick={handleSubmit} className="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-indigo-700 shrink-0">등록</button>
         </div>
     );
 };
 
 const AdminSettingsForm = () => {
     const { departments, companyName, approvalLine, dbUpdateSettings, showConfirm, showToast } = useContext(AppContext);
-    const [newDept, setNewDept] = useState('');
-    const [newPw, setNewPw] = useState('');
-    const [newCompany, setNewCompany] = useState('');
-    const [newTitle, setNewTitle] = useState('');
+    
+    const newDeptRef = useRef(null);
+    const newPwRef = useRef(null);
+    const newCompanyRef = useRef(null);
+    const newTitleRef = useRef(null);
 
     return (
         <div className="flex flex-col lg:flex-row gap-6 h-full p-2 md:p-4 overflow-auto">
             <div className="w-full lg:w-1/2 bg-slate-50 p-4 md:p-6 rounded border space-y-8 shrink-0">
                 <div>
                     <h2 className="text-lg font-bold mb-4">부서 관리</h2>
-                    <div className="flex gap-2 mb-4"><input type="text" value={newDept} onChange={e=>setNewDept(e.target.value)} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder="새 부서명"/><button onClick={()=>{if(!newDept)return; dbUpdateSettings('departments', [...departments, newDept]); setNewDept(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
+                    <div className="flex gap-2 mb-4">
+                        <input type="text" ref={newDeptRef} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder="새 부서명"/>
+                        <button onClick={()=>{const val = newDeptRef.current.value; if(!val)return; dbUpdateSettings('departments', [...departments, val]); newDeptRef.current.value=''; showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button>
+                    </div>
                     <div className="flex flex-wrap gap-2">{departments.map((d,i)=><div key={`dept-${i}`} className="bg-white border px-3 py-1 rounded text-sm flex gap-2 items-center">{d}<button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('departments', departments.filter(x=>x!==d)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                 </div>
                 <div className="border-t pt-8 border-slate-200">
                     <h2 className="text-lg font-bold mb-4">관리자 비밀번호 변경</h2>
-                    <div className="flex gap-2"><input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/><button onClick={()=>{if(!newPw)return; dbUpdateSettings('adminPassword', newPw); setNewPw(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
+                    <div className="flex gap-2">
+                        <input type="text" ref={newPwRef} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/>
+                        <button onClick={()=>{const val = newPwRef.current.value; if(!val)return; dbUpdateSettings('adminPassword', val); newPwRef.current.value=''; showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button>
+                    </div>
                 </div>
                 <div className="border-t pt-8 border-slate-200">
                     <h2 className="text-lg font-bold mb-4">회사명 설정</h2>
-                    <div className="flex gap-2"><input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder={`현재: ${companyName}`}/><button onClick={()=>{if(!newCompany)return; dbUpdateSettings('companyName', newCompany); setNewCompany(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
+                    <div className="flex gap-2">
+                        <input type="text" ref={newCompanyRef} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder={`현재: ${companyName}`}/>
+                        <button onClick={()=>{const val = newCompanyRef.current.value; if(!val)return; dbUpdateSettings('companyName', val); newCompanyRef.current.value=''; showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button>
+                    </div>
                 </div>
             </div>
             <div className="w-full lg:w-1/2 bg-slate-50 p-4 md:p-6 rounded border shrink-0">
                 <h2 className="text-lg font-bold mb-4">신청서 결재란 설정</h2>
-                <div className="flex gap-2 mb-4"><input type="text" value={newTitle} onChange={e=>setNewTitle(e.target.value)} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; dbUpdateSettings('approvalLine', [...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
+                <div className="flex gap-2 mb-4">
+                    <input type="text" ref={newTitleRef} autoComplete="off" className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/>
+                    <button onClick={()=>{const val = newTitleRef.current.value; if(!val)return; dbUpdateSettings('approvalLine', [...approvalLine, val]); newTitleRef.current.value=''; showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button>
+                </div>
                 <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalLine.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
             </div>
         </div>
@@ -448,18 +506,30 @@ const AdminSettingsForm = () => {
 
 const EditRecordModal = ({ record, onSave, onClose }) => {
     const [editData, setEditData] = useState({});
-    useEffect(() => { if (record) setEditData({ ...record }); }, [record]);
+    const remarkRef = useRef(null);
+
+    useEffect(() => { 
+        if (record) {
+            setEditData({ ...record }); 
+            if(remarkRef.current) remarkRef.current.value = record.remark || '';
+        }
+    }, [record]);
+    
     if (!record) return null;
 
+    const handleSave = () => {
+        onSave({ ...editData, remark: remarkRef.current?.value || '' });
+    }
+
     return (
-        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[100] p-4">
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[100] p-4 print:hidden">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 animate-in zoom-in-95 duration-200">
                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-indigo-700">내역 상세 수정</h3>
                 <div className="space-y-4">
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">일자</label><input type="date" value={editData.date || ''} onChange={e=>setEditData({...editData, date:e.target.value})} className="w-full border p-2 rounded bg-slate-50"/></div>
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">구분 (발생/사용)</label><select value={editData.type || ''} onChange={e=>setEditData({...editData, type:e.target.value})} className="w-full border p-2 rounded bg-slate-50"><option value="발생">발생</option><option value="사용">사용</option></select></div>
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">일수 (숫자)</label><input type="number" step="0.5" value={editData.days || 0} onChange={e=>setEditData({...editData, days:parseFloat(e.target.value)})} className="w-full border p-2 rounded bg-slate-50"/></div>
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">적요(사유/비고)</label><input type="text" value={editData.remark || ''} onChange={e=>setEditData({...editData, remark:e.target.value})} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded bg-slate-50"/></div>
+                    <div><label className="block text-xs font-bold text-slate-500 mb-1">적요(사유/비고)</label><input type="text" ref={remarkRef} autoComplete="off" spellCheck="false" className="w-full border p-2 rounded bg-slate-50"/></div>
                     {editData.isAuto && (
                         <label className="flex items-center gap-2 cursor-pointer mt-4 p-3 bg-indigo-50 text-indigo-700 rounded border border-indigo-100">
                             <input type="checkbox" checked={editData.isFulfilled} onChange={e=>setEditData({...editData, isFulfilled:e.target.checked})} className="w-4 h-4"/>
@@ -469,7 +539,7 @@ const EditRecordModal = ({ record, onSave, onClose }) => {
                 </div>
                 <div className="flex gap-2 mt-6">
                     <button onClick={onClose} className="flex-1 py-3 bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300">취소</button>
-                    <button onClick={()=>onSave(editData)} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700">저장하기</button>
+                    <button onClick={handleSave} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-lg shadow hover:bg-indigo-700">저장하기</button>
                 </div>
             </div>
         </div>
@@ -477,7 +547,7 @@ const EditRecordModal = ({ record, onSave, onClose }) => {
 };
 
 // --------------------------------------------------------
-// 인쇄 모달 컴포넌트들 (인쇄 잘림/2페이지 백지 방지 구조 적용)
+// 인쇄 모달 컴포넌트들 (A4 꽉 차게 1장 출력 설계)
 // --------------------------------------------------------
 
 const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
@@ -527,12 +597,6 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                     </div>
                 </div>
             </div>
-            <style dangerouslySetInnerHTML={{ __html: `
-                @media print {
-                    @page { size: A4 portrait; margin: 15mm; }
-                    body { background: white !important; margin: 0; padding: 0; }
-                }
-            `}} />
         </div>
     );
 };
@@ -578,12 +642,6 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                     </table>
                 </div>
             </div>
-            <style dangerouslySetInnerHTML={{ __html: `
-                @media print { 
-                    @page { size: A4 portrait; margin: 15mm; } 
-                    body { background: white !important; margin: 0; padding: 0; }
-                }
-            `}} />
         </div>
     );
 };
@@ -767,10 +825,12 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                     </div>
                 </div>
             </div>
+            
+            {/* 안전을 위한 CSS 추가 (페이지 및 백지 설정) */}
             <style dangerouslySetInnerHTML={{ __html: `
                  @media print { 
                      @page { size: A4 portrait; margin: 15mm; } 
-                     body { background: white !important; margin: 0; padding: 0; }
+                     body { background: white !important; margin: 0 !important; padding: 0 !important; }
                  }
             `}} />
         </div>
@@ -778,7 +838,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
 };
 
 // --------------------------------------------------------
-// 관리자 / 사용자 메인 뷰
+// 관리자 / 사용자 메인 뷰 (레이아웃 인쇄 숨김 완벽 분리)
 // --------------------------------------------------------
 
 function AdminView() {
@@ -874,13 +934,15 @@ function AdminView() {
     };
 
     return (
-        <div className="max-w-[1200px] mx-auto p-2 md:p-4 min-h-screen flex flex-col">
+        <div className="max-w-[1200px] mx-auto p-2 md:p-4 min-h-screen flex flex-col print:p-0 print:min-h-0 print:block">
+            {/* 모달(인쇄창)들은 print:hidden 영향을 받지 않는 바깥 영역에 배치됨 */}
             <PrintApplicationModal record={printModal} user={{}} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
             <PrintSummaryModal employee={summaryModal?.emp} records={summaryModal?.records} gen={summaryModal?.gen} used={summaryModal?.used} onClose={() => setSummaryModal(null)} />
             <EditRecordModal record={editingRecord} onSave={handleSaveRecord} onClose={() => setEditingRecord(null)} />
             {promoModalOpen && <PrintPromotionModal allEmployees={employees} records={leaveRecords} onClose={()=>setPromoModalOpen(false)} />}
             
-            <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0 mb-4">
+            {/* 앱 배경 UI 요소들에만 선별적으로 print:hidden 적용하여 백지 방지 */}
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0 mb-4 print:hidden">
                 <div className="flex items-center gap-2 font-black text-slate-700 text-lg"><Icons.Briefcase /> 관리자 시스템 (서버 연결됨)</div>
                 <div className="flex items-center justify-between w-full md:w-auto gap-4 text-sm mt-2 md:mt-0">
                     <span className="font-bold">관리자님 환영합니다</span>
@@ -888,13 +950,13 @@ function AdminView() {
                 </div>
             </header>
 
-            <div className="flex gap-1 overflow-x-auto whitespace-nowrap shrink-0 pb-1 mb-2">
+            <div className="flex gap-1 overflow-x-auto whitespace-nowrap shrink-0 pb-1 mb-2 print:hidden">
                 {['직원 관리', '휴가 내역(전체)', '시스템 설정'].map(t => (
                     <button key={t} onClick={() => setTab(t)} className={`px-4 md:px-6 py-2 rounded-lg md:rounded-t-lg md:rounded-b-none font-bold transition flex-1 text-center md:flex-none ${tab === t ? 'bg-indigo-600 text-white' : 'bg-white text-slate-500 hover:bg-slate-100 shadow-sm'}`}>{t}</button>
                 ))}
             </div>
 
-            <main className="flex-1 bg-white md:rounded-b-lg rounded-lg md:rounded-tl-none shadow-sm border p-4 md:p-6 overflow-hidden flex flex-col min-h-[500px]">
+            <main className="flex-1 bg-white md:rounded-b-lg rounded-lg md:rounded-tl-none shadow-sm border p-4 md:p-6 overflow-hidden flex flex-col min-h-[500px] print:hidden">
                 {tab === '직원 관리' && (
                     <div className="flex flex-col lg:flex-row gap-6 h-full">
                         <AdminEmployeeForm departments={departments} editingEmp={editingEmp} onSave={handleEmpSave} onCancel={() => setEditingEmp(null)} />
@@ -1045,10 +1107,12 @@ function UserView() {
     const decryptedUserRealName = decryptName(user.realName);
 
     return (
-        <div className="max-w-[1000px] mx-auto p-2 md:p-4 min-h-screen flex flex-col">
+        <div className="max-w-[1000px] mx-auto p-2 md:p-4 min-h-screen flex flex-col print:p-0 print:min-h-0 print:block">
+            {/* 인쇄창 모달 */}
             <PrintApplicationModal record={printModal} user={user} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
             
-            <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0 mb-4">
+            {/* 앱 배경 UI 요소에 print:hidden 적용 */}
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0 mb-4 print:hidden">
                 <div className="flex items-center gap-2 font-black text-indigo-700 text-lg"><Icons.Calendar /> 연차 관리 시스템 (서버 연결됨)</div>
                 <div className="flex items-center justify-between w-full md:w-auto gap-4 text-sm mt-2 md:mt-0">
                     <span className="font-bold">{user.dept} {decryptedUserRealName}님 환영합니다</span>
@@ -1056,7 +1120,7 @@ function UserView() {
                 </div>
             </header>
             
-            <main className="flex-1 flex flex-col lg:flex-row gap-4 md:gap-6">
+            <main className="flex-1 flex flex-col lg:flex-row gap-4 md:gap-6 print:hidden">
                 <div className="w-full lg:w-1/3 flex flex-col gap-4 md:gap-6">
                     <div className="flex gap-2 bg-white p-4 rounded-xl shadow border">
                         <div className="flex-1 text-center bg-blue-50 py-3 rounded-lg"><div className="text-[10px] text-slate-500 mb-1 font-bold">총 발생</div><div className="text-lg font-black text-blue-700">{gen}일</div></div>

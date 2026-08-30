@@ -657,7 +657,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                                 </tbody>
                                             </table>
                                             <p className="leading-relaxed text-justify mt-4">
-                                                귀원은 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
+                                                귀하는 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
                                             </p>
                                             <p className="leading-relaxed text-justify">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.

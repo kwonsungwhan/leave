@@ -725,95 +725,95 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                 </div>
                                 <div className="flex-1 p-6 md:p-12 overflow-auto print:p-0 print:overflow-visible print:block">
                                     {docType === '촉구서' ? (
-                                        <div className="space-y-8 text-base flex flex-col h-full print:h-auto print:block text-slate-900">
-                                            <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-6 text-lg">
+                                        <div className="space-y-4 text-base flex flex-col h-full print:h-auto print:block text-slate-900 print:text-sm">
+                                            <h1 className="text-2xl print:text-3xl font-black text-center mb-6 print:mb-6 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
+                                            <table className="w-full border-collapse border border-black text-center mb-4 text-base print:text-sm">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-3 w-1/4">부서</th><td className="border border-black p-3">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-3 w-1/4">성명</th><td className="border border-black p-3 font-bold">{decryptedSelectedName}</td></tr>
-                                                    <tr><th className="border border-black bg-slate-100 p-3">총 발생일수</th><td className="border border-black p-3">{calculateStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-3">사용일수</th><td className="border border-black p-3">{calculateStatus(selectedEmp).used}일</td></tr>
-                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-3 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-3 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-2 print:p-1.5 w-1/4">부서</th><td className="border border-black p-2 print:p-1.5">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 print:p-1.5 w-1/4">성명</th><td className="border border-black p-2 print:p-1.5 font-bold">{decryptedSelectedName}</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-2 print:p-1.5">총 발생일수</th><td className="border border-black p-2 print:p-1.5">{calculateStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-2 print:p-1.5">사용일수</th><td className="border border-black p-2 print:p-1.5">{calculateStatus(selectedEmp).used}일</td></tr>
+                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 print:p-1.5 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 print:p-1.5 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
-                                            <p className="leading-relaxed text-left mt-4">
+                                            <p className="leading-relaxed text-left mt-2">
                                                 귀하는 「근로기준법 제61조」에 의거하여, 귀하의 미사용 연차 유급휴가 일수를 위와 같이 통지하오니, 
                                                 본 통지서를 수령한 날로부터 <strong>10일 이내</strong>에 미사용 연차 유급휴가의 사용 시기를 정하여 회사에 서면으로 통보하여 주시기 바랍니다.
                                             </p>
-                                            <p className="leading-relaxed text-left mt-2">
+                                            <p className="leading-relaxed text-left mt-1">
                                                 만약, 10일 이내에 사용 시기를 통보하지 않을 경우 회사가 귀하의 휴가 사용 시기를 임의로 지정하여 통보할 수 있으며, 
                                                 그럼에도 불구하고 휴가를 사용하지 않아 소멸된 연차 휴가에 대해서는 <strong>금전적 보상의무가 면제됨</strong>을 알려드립니다.
                                             </p>
-                                            <div className="text-center mt-12 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center mt-6 print:mt-4 font-bold text-lg">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right mt-4 text-xl font-black mb-6 print:mb-4">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
                                             
-                                            <div className="border-2 border-dashed border-black p-6 mt-12 bg-white w-full text-left print:break-inside-avoid print:mt-24">
-                                                <h3 className="font-bold text-center text-lg mb-6">[ 본 인 수 령 증 ]</h3>
-                                                <p className="text-base mb-8 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
+                                            <div className="border-2 border-dashed border-black p-4 md:p-6 mt-auto bg-white w-full text-left print:break-inside-avoid print:mt-6">
+                                                <h3 className="font-bold text-center text-lg mb-4 print:mb-3">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-sm md:text-base mb-6 print:mb-4 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
                                                 
-                                                <div className="flex flex-col gap-8 text-base px-4">
+                                                <div className="flex flex-col gap-6 print:gap-4 text-sm md:text-base px-2 md:px-4">
                                                     <div className="flex items-end">
-                                                        <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
-                                                        <span className="flex-1 border-b border-black h-6"></span>
+                                                        <span className="w-20 md:w-24 whitespace-nowrap font-bold">수령일자 :</span>
+                                                        <span className="flex-1 border-b border-black h-5"></span>
                                                     </div>
                                                     <div className="flex items-end justify-between w-full">
                                                         <div className="flex items-end flex-1">
-                                                            <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
-                                                            <span className="flex-1 border-b border-black h-6 min-w-[150px]"></span>
+                                                            <span className="w-24 md:w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
+                                                            <span className="flex-1 border-b border-black h-5 min-w-[100px]"></span>
                                                         </div>
-                                                        <span className="whitespace-nowrap ml-4">(서명 또는 인)</span>
+                                                        <span className="whitespace-nowrap ml-2 md:ml-4">(서명 또는 인)</span>
                                                     </div>
                                                 </div>
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-8 text-base flex flex-col h-full print:h-auto print:block text-slate-900">
-                                            <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-6 text-lg">
+                                        <div className="space-y-4 text-base flex flex-col h-full print:h-auto print:block text-slate-900 print:text-sm">
+                                            <h1 className="text-2xl print:text-3xl font-black text-center mb-6 print:mb-6 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
+                                            <table className="w-full border-collapse border border-black text-center mb-4 text-base print:text-sm">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-3 w-1/4">부서</th><td className="border border-black p-3">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-3 w-1/4">성명</th><td className="border border-black p-3 font-bold">{decryptedSelectedName}</td></tr>
-                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-3 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-3 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
+                                                    <tr><th className="border border-black bg-slate-100 p-2 print:p-1.5 w-1/4">부서</th><td className="border border-black p-2 print:p-1.5">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 print:p-1.5 w-1/4">성명</th><td className="border border-black p-2 print:p-1.5 font-bold">{decryptedSelectedName}</td></tr>
+                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 print:p-1.5 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 print:p-1.5 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
-                                            <p className="leading-relaxed text-left mt-4">
+                                            <p className="leading-relaxed text-left mt-2">
                                                 귀하는 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
                                             </p>
-                                            <p className="leading-relaxed text-left mt-2">
+                                            <p className="leading-relaxed text-left mt-1">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
                                             </p>
                                             
-                                            <div className="border border-black p-4 mt-6 bg-slate-50 w-full text-left print:bg-white print:border-2">
-                                                <h3 className="font-bold text-center text-lg mb-6">[ 연차 유급휴가 사용 지정 내역 ]</h3>
-                                                <div className="flex flex-col gap-6 text-base px-2 md:px-8 py-4">
+                                            <div className="border border-black p-3 mt-4 bg-slate-50 w-full text-left print:bg-white print:border-2">
+                                                <h3 className="font-bold text-center text-base md:text-lg mb-4 print:mb-3">[ 연차 유급휴가 사용 지정 내역 ]</h3>
+                                                <div className="flex flex-col gap-4 print:gap-3 text-sm md:text-base px-2 md:px-4 py-2">
                                                     {[1, 2, 3].map((num) => (
                                                         <div key={num} className="flex items-end justify-between w-full">
-                                                            <span className="whitespace-nowrap font-bold mr-4">{num}차 지정 :</span>
-                                                            <span className="flex-1 border-b border-black h-6"></span>
-                                                            <span className="whitespace-nowrap mx-4">부터</span>
-                                                            <span className="flex-1 border-b border-black h-6"></span>
-                                                            <span className="whitespace-nowrap mx-4">까지</span>
-                                                            <span className="whitespace-nowrap ml-2">(총 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 일)</span>
+                                                            <span className="whitespace-nowrap font-bold mr-2 md:mr-4">{num}차 지정 :</span>
+                                                            <span className="flex-1 border-b border-black h-5"></span>
+                                                            <span className="whitespace-nowrap mx-2 md:mx-4">부터</span>
+                                                            <span className="flex-1 border-b border-black h-5"></span>
+                                                            <span className="whitespace-nowrap mx-2 md:mx-4">까지</span>
+                                                            <span className="whitespace-nowrap ml-1 md:ml-2">(총 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 일)</span>
                                                         </div>
                                                     ))}
                                                 </div>
                                             </div>
 
-                                            <div className="text-center mt-12 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center mt-6 print:mt-4 font-bold text-lg">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right mt-4 text-xl font-black mb-6 print:mb-4">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 
-                                            <div className="border-2 border-dashed border-black p-6 mt-12 bg-white w-full text-left print:break-inside-avoid print:mt-16">
-                                                <h3 className="font-bold text-center text-lg mb-6">[ 본 인 수 령 증 ]</h3>
-                                                <p className="text-base mb-8 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
+                                            <div className="border-2 border-dashed border-black p-4 md:p-6 mt-auto bg-white w-full text-left print:break-inside-avoid print:mt-6">
+                                                <h3 className="font-bold text-center text-lg mb-4 print:mb-3">[ 본 인 수 령 증 ]</h3>
+                                                <p className="text-sm md:text-base mb-6 print:mb-4 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
                                                 
-                                                <div className="flex flex-col gap-8 text-base px-4">
+                                                <div className="flex flex-col gap-6 print:gap-4 text-sm md:text-base px-2 md:px-4">
                                                     <div className="flex items-end">
-                                                        <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
-                                                        <span className="flex-1 border-b border-black h-6"></span>
+                                                        <span className="w-20 md:w-24 whitespace-nowrap font-bold">수령일자 :</span>
+                                                        <span className="flex-1 border-b border-black h-5"></span>
                                                     </div>
                                                     <div className="flex items-end justify-between w-full">
                                                         <div className="flex items-end flex-1">
-                                                            <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
-                                                            <span className="flex-1 border-b border-black h-6 min-w-[150px]"></span>
+                                                            <span className="w-24 md:w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
+                                                            <span className="flex-1 border-b border-black h-5 min-w-[100px]"></span>
                                                         </div>
-                                                        <span className="whitespace-nowrap ml-4">(서명 또는 인)</span>
+                                                        <span className="whitespace-nowrap ml-2 md:ml-4">(서명 또는 인)</span>
                                                     </div>
                                                 </div>
                                             </div>

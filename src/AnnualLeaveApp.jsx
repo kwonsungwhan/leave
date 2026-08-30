@@ -283,7 +283,7 @@ export default function AnnualLeaveApp() {
         await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });
     };
 
-    // 불필요한 렌더링으로 인한 모바일 한글 씹힘 현상 방지
+    // 불필요한 렌더링으로 인한 자원 낭비 방지
     const ctx = useMemo(() => ({
         user, setUser, employees, departments, leaveRecords, adminPassword, approvalLine, companyName, 
         showToast, showConfirm, dbUpdateSettings, publicPath
@@ -307,21 +307,28 @@ function LoginView() {
     const { setUser, departments, employees, adminPassword, showToast } = useContext(AppContext);
     const [mode, setMode] = useState('user');
     const [dept, setDept] = useState(departments[0] || '');
-    const [name, setName] = useState('');
-    const [pw, setPw] = useState('');
+    
+    // 💡 모바일 한글 입력 버그 원천 차단: React 상태(State) 대신 순수 HTML 참조(Ref) 방식 사용
+    const nameRef = React.useRef(null);
+    const pwRef = React.useRef(null);
 
     useEffect(() => { if (!dept && departments.length > 0) setDept(departments[0]); }, [departments]);
 
     const handleLogin = (e) => {
         e.preventDefault();
+        
+        // 제출 시점에만 입력값을 가져옴 (입력 중에는 React가 간섭하지 않음)
+        const inputName = nameRef.current?.value || '';
+        const inputPw = pwRef.current?.value || '';
+
         if (mode === 'admin') {
-            if (pw === adminPassword) {
+            if (inputPw === adminPassword) {
                 setUser({ role: 'admin', name: '관리자' });
                 showToast('관리자로 로그인했습니다.');
             } else showToast('비밀번호가 틀렸습니다.', 'error');
         } else {
-            const emp = employees.find(e => e.dept === dept && decryptName(e.realName) === name);
-            if (emp && pw === emp.pw) {
+            const emp = employees.find(e => e.dept === dept && decryptName(e.realName) === inputName);
+            if (emp && inputPw === emp.pw) {
                 setUser({ role: 'user', ...emp, realName: decryptName(emp.realName) });
                 showToast(`${maskName(emp.realName)}님 환영합니다.`);
             } else showToast('부서, 성명 또는 비밀번호가 일치하지 않습니다.', 'error');
@@ -339,19 +346,34 @@ function LoginView() {
                 <form onSubmit={handleLogin} className="space-y-4">
                     {mode === 'user' && (
                         <>
-                            <div><label className="block text-xs font-bold text-slate-500 mb-1">부서</label><select required className="w-full p-3 border rounded bg-white" value={dept} onChange={e => setDept(e.target.value)}><option value="">선택</option>{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-1">부서</label>
+                                <select required className="w-full p-3 border rounded bg-white" value={dept} onChange={e => setDept(e.target.value)}>
+                                    <option value="">선택</option>
+                                    {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                                </select>
+                            </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1">성명</label>
-                                {/* 한글 입력 버그 수정을 위해 autoComplete, spellCheck 등 모두 제거 */}
-                                <input required type="text" className="w-full p-3 border rounded bg-white" placeholder="본명 입력" value={name} onChange={e => setName(e.target.value)} />
+                                {/* 💡 비제어 컴포넌트(ref) 적용 */}
+                                <input required type="text" ref={nameRef} className="w-full p-3 border rounded bg-white focus:border-indigo-500 outline-none" placeholder="본명 입력" />
                             </div>
                         </>
                     )}
-                    <div><label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 {mode === 'user' && <span className="text-slate-400 font-normal">(초기: 1234)</span>}</label><input required type="password" className="w-full p-3 border rounded bg-white" value={pw} onChange={e => setPw(e.target.value)} /></div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 {mode === 'user' && <span className="text-slate-400 font-normal">(초기: 1234)</span>}</label>
+                        {/* 💡 비제어 컴포넌트(ref) 적용 */}
+                        <input required type="password" ref={pwRef} className="w-full p-3 border rounded bg-white focus:border-indigo-500 outline-none" />
+                    </div>
                     <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3 rounded shadow hover:bg-indigo-700">로그인</button>
                 </form>
                 <div className="absolute bottom-6 right-6">
-                    <button type="button" onClick={() => { setMode(mode === 'admin' ? 'user' : 'admin'); setPw(''); setName(''); setDept(departments[0]||''); }} className="text-xs text-slate-300 hover:text-slate-500 font-medium transition-colors">
+                    <button type="button" onClick={() => { 
+                        setMode(mode === 'admin' ? 'user' : 'admin'); 
+                        if(nameRef.current) nameRef.current.value = ''; 
+                        if(pwRef.current) pwRef.current.value = ''; 
+                        setDept(departments[0]||''); 
+                    }} className="text-xs text-slate-300 hover:text-slate-500 font-medium transition-colors">
                         {mode === 'admin' ? '직원 접속' : '관리자 접속'}
                     </button>
                 </div>
@@ -400,7 +422,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         <button onClick={onClose} className="text-slate-500 p-2 hover:bg-slate-200 rounded"><Icons.X /></button>
                     </div>
                 </div>
-                <div className="p-12 overflow-auto bg-white print:p-0 print:overflow-visible print:block">
+                <div className="p-12 overflow-auto bg-white print:p-0 print:overflow-visible print:block" id="print-area">
                     <h1 className="text-3xl font-black text-center mb-8 tracking-widest decoration-4 underline underline-offset-8">휴가 신청서</h1>
                     <div className="flex justify-between items-end mb-6">
                         <div className="text-sm">문서번호: AL-{record.date.replace(/-/g, '')}-{record.id.substring(record.id.length-4).toUpperCase()}<br/>출력일자: {new Date().toLocaleDateString()}</div>
@@ -434,6 +456,21 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                     </div>
                 </div>
             </div>
+            <style dangerouslySetInnerHTML={{ __html: `
+                @media print {
+                    @page { size: A4 portrait; margin: 15mm; }
+                    body * { visibility: hidden; }
+                    #print-area, #print-area * { visibility: visible; }
+                    #print-area {
+                        position: absolute;
+                        left: 0;
+                        top: 0;
+                        width: 100%;
+                        box-sizing: border-box;
+                        background: white;
+                    }
+                }
+            `}} />
         </div>
     );
 };
@@ -451,7 +488,7 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                         <button onClick={onClose} className="text-slate-500 p-2 hover:bg-slate-200 rounded"><Icons.X /></button>
                     </div>
                 </div>
-                <div className="p-8 overflow-auto bg-white print:p-0 print:overflow-visible print:block">
+                <div className="p-8 overflow-auto bg-white print:p-0 print:overflow-visible print:block" id="print-area">
                     <h1 className="text-3xl font-black text-center mb-6">개인별 연차 휴가 집계표</h1>
                     <div className="flex justify-between items-end mb-4">
                         <div className="text-sm">출력일자: {new Date().toLocaleDateString()}</div>
@@ -479,6 +516,14 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                     </table>
                 </div>
             </div>
+            <style dangerouslySetInnerHTML={{ __html: `
+                @media print { 
+                    @page { size: A4 portrait; margin: 15mm; } 
+                    body * { visibility: hidden; } 
+                    #print-area, #print-area * { visibility: visible; } 
+                    #print-area { position: absolute; left: 0; top: 0; width: 100%; box-sizing: border-box; } 
+                }
+            `}} />
         </div>
     );
 };
@@ -560,7 +605,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                     </div>
                                     <button onClick={() => window.print()} className="bg-slate-800 text-white px-4 py-1.5 rounded font-bold flex items-center gap-2 text-sm"><Icons.Download /> 인쇄</button>
                                 </div>
-                                <div className="flex-1 p-6 md:p-12 overflow-auto print:p-0 print:overflow-visible print:block">
+                                <div className="flex-1 p-6 md:p-12 overflow-auto print:p-0 print:overflow-visible print:block" id="print-area">
                                     {docType === '촉구서' ? (
                                         <div className="space-y-8 text-base flex flex-col h-full print:h-auto print:block text-slate-900">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
@@ -583,17 +628,17 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
                                             
                                             {/* 본인 수령증 구역 (하단 여백 확보 및 줄 분리) */}
-                                            <div className="border-2 border-dashed border-black p-6 mt-12 bg-white w-full text-left print:break-inside-avoid print:mt-16">
+                                            <div className="border-2 border-dashed border-black p-6 mt-12 bg-white w-full text-left print:break-inside-avoid print:mt-24">
                                                 <h3 className="font-bold text-center text-lg mb-6">[ 본 인 수 령 증 ]</h3>
                                                 <p className="text-base mb-8 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
                                                 
                                                 <div className="flex flex-col gap-8 text-base px-4">
-                                                    {/* 첫 번째 줄: 수령일자 */}
+                                                    {/* 첫 번째 줄: 수령일자 (빈칸) */}
                                                     <div className="flex items-end">
                                                         <span className="w-24 whitespace-nowrap font-bold">수령일자 :</span>
                                                         <span className="flex-1 border-b border-black h-6"></span>
                                                     </div>
-                                                    {/* 두 번째 줄: 수령자 (본인) */}
+                                                    {/* 두 번째 줄: 수령자 서명 (빈칸) */}
                                                     <div className="flex items-end">
                                                         <span className="w-32 whitespace-nowrap font-bold">수령자(본인) :</span>
                                                         <span className="flex-1 border-b border-black h-6"></span>
@@ -621,7 +666,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 
                                             {/* 본인 수령증 구역 */}
-                                            <div className="border-2 border-dashed border-black p-6 mt-12 bg-white w-full text-left print:break-inside-avoid print:mt-16">
+                                            <div className="border-2 border-dashed border-black p-6 mt-12 bg-white w-full text-left print:break-inside-avoid print:mt-24">
                                                 <h3 className="font-bold text-center text-lg mb-6">[ 본 인 수 령 증 ]</h3>
                                                 <p className="text-base mb-8 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
                                                 
@@ -645,6 +690,20 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                     </div>
                 </div>
             </div>
+            <style dangerouslySetInnerHTML={{ __html: `
+                 @media print { 
+                     @page { size: A4 portrait; margin: 15mm; } 
+                     body * { visibility: hidden; } 
+                     #print-area, #print-area * { visibility: visible; } 
+                     #print-area { 
+                         position: absolute; 
+                         left: 0; 
+                         top: 0; 
+                         width: 100%; 
+                         box-sizing: border-box;
+                     } 
+                 }
+            `}} />
         </div>
     );
 };
@@ -996,8 +1055,10 @@ function UserView() {
     const { user, setUser, leaveRecords, approvalLine, showToast, showConfirm, publicPath } = useContext(AppContext);
     const [applyDate, setApplyDate] = useState('');
     const [applyDays, setApplyDays] = useState(1);
-    const [applyRemark, setApplyRemark] = useState('');
     const [printModal, setPrintModal] = useState(null);
+    
+    // 💡 모바일 한글 입력 버그 원천 차단: React 상태(State) 대신 순수 HTML 참조(Ref) 방식 사용
+    const remarkRef = React.useRef(null);
 
     const userRecords = leaveRecords.filter(r => r.empId === user.empId).sort((a, b) => new Date(b.date) - new Date(a.date));
     const gen = userRecords.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)).reduce((a, b) => a + b.days, 0);
@@ -1008,6 +1069,9 @@ function UserView() {
         e.preventDefault();
         if (!applyDate) return;
         
+        // 제출 시점에만 입력값을 가져옴 (입력 중에는 React가 간섭하지 않음)
+        const applyRemark = remarkRef.current?.value || '';
+        
         const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         try {
             await setDoc(doc(db, publicPath, 'leaveRecords', newId), {
@@ -1017,7 +1081,7 @@ function UserView() {
             });
             showToast('신청 완료'); 
             setApplyDate(''); 
-            setApplyRemark('');
+            if(remarkRef.current) remarkRef.current.value = '';
         } catch(err) {
             showToast('신청 중 오류가 발생했습니다.', 'error');
         }
@@ -1053,7 +1117,11 @@ function UserView() {
                             <div className="space-y-4 text-sm">
                                 <div><label className="block font-bold mb-1">시작일</label><input required type="date" value={applyDate} onChange={e => setApplyDate(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" /></div>
                                 <div><label className="block font-bold mb-1">사용 기간</label><select value={applyDays} onChange={e => setApplyDays(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50">{[0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => <option key={`day-${d}`} value={d}>{d}일간</option>)}</select></div>
-                                <div><label className="block font-bold mb-1">사유/적요</label><input type="text" value={applyRemark} onChange={e => setApplyRemark(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" /></div>
+                                <div>
+                                    <label className="block font-bold mb-1">사유/적요</label>
+                                    {/* 💡 비제어 컴포넌트(ref) 적용 */}
+                                    <input type="text" ref={remarkRef} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" />
+                                </div>
                                 <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold shadow hover:bg-indigo-700 transition">신청하기</button>
                             </div>
                         </form>

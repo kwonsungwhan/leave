@@ -43,7 +43,7 @@ const addYearsExact = (dateStr, years) => {
     return `${y + years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 };
 
-// 🔒 성명 암호화 및 복구 유틸리티 (DB에는 암호화 저장, UI/출력 시 복구)
+// 🔒 성명 암호화 및 복구 유틸리티
 const ENCRYPT_KEY = "LEAVE_APP_SECURE_2026";
 const encryptName = (name) => {
     if (!name) return "";
@@ -179,7 +179,6 @@ export default function AnnualLeaveApp() {
                 for (const rec of leaveRecords) {
                     if (!rec.date) continue;
                     const recYear = parseInt(rec.date.split('-')[0], 10);
-                    // 4년 초과 데이터이고, '발생' 데이터만 영구삭제
                     if (recYear <= cutoffYear && rec.type === '발생') {
                         await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
                     }
@@ -322,7 +321,7 @@ function LoginView() {
                     {mode === 'user' && (
                         <>
                             <div><label className="block text-xs font-bold text-slate-500 mb-1">부서</label><select required className="w-full p-3 border rounded" value={dept} onChange={e => setDept(e.target.value)}><option value="">선택</option>{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                            <div><label className="block text-xs font-bold text-slate-500 mb-1">성명</label><input required type="text" className="w-full p-3 border rounded" placeholder="본명 입력" value={name} onChange={e => setName(e.target.value)} /></div>
+                            <div><label className="block text-xs font-bold text-slate-500 mb-1">성명</label><input required type="text" autoComplete="off" autoCorrect="off" spellCheck="false" className="w-full p-3 border rounded" placeholder="본명 입력" value={name} onChange={e => setName(e.target.value)} /></div>
                         </>
                     )}
                     <div><label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 {mode === 'user' && <span className="text-slate-400 font-normal">(초기: 1234)</span>}</label><input required type="password" className="w-full p-3 border rounded" value={pw} onChange={e => setPw(e.target.value)} /></div>
@@ -405,7 +404,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                     </table>
                     <div className="text-center text-lg mb-16">위와 같이 휴가를 신청하오니 허가하여 주시기 바랍니다.</div>
                     <div className="text-center mb-8 text-lg font-bold">{new Date(record.date).toLocaleDateString()}</div>
-                    <div className="flex justify-end items-end text-lg pr-12 mt-16">
+                    <div className="flex justify-end items-end text-lg pr-12 mt-16 print:break-inside-avoid">
                         <span className="mr-4">신청자 :</span>
                         <div className="w-48 border-b-2 border-black border-dotted h-6 mr-2"></div>
                         <span>(서명/인)</span>
@@ -414,10 +413,19 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
             </div>
             <style dangerouslySetInnerHTML={{ __html: `
                 @media print {
-                    @page { size: A4 portrait; margin: 15mm; }
+                    @page { size: A4 portrait; margin: 10mm; }
+                    html, body { height: auto !important; overflow: visible !important; background: white !important; }
                     body * { visibility: hidden !important; }
-                    .fixed.inset-0, .fixed.inset-0 * { visibility: visible !important; }
-                    .fixed.inset-0 { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; }
+                    #print-area, #print-area * { visibility: visible !important; }
+                    #print-area {
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        height: auto !important;
+                    }
                 }
             `}} />
         </div>
@@ -467,10 +475,19 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
             </div>
             <style dangerouslySetInnerHTML={{ __html: `
                 @media print { 
-                    @page { size: A4 portrait; margin: 15mm; } 
+                    @page { size: A4 portrait; margin: 10mm; } 
+                    html, body { height: auto !important; overflow: visible !important; background: white !important; }
                     body * { visibility: hidden !important; }
-                    .fixed.inset-0, .fixed.inset-0 * { visibility: visible !important; }
-                    .fixed.inset-0 { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; }
+                    #print-area, #print-area * { visibility: visible !important; }
+                    #print-area {
+                        position: absolute !important;
+                        left: 0 !important;
+                        top: 0 !important;
+                        width: 100% !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        height: auto !important;
+                    }
                 }
             `}} />
         </div>
@@ -556,7 +573,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                 </div>
                                 <div className="flex-1 p-12 overflow-auto print:p-0 print:overflow-visible" id="print-area">
                                     {docType === '촉구서' ? (
-                                        <div className="space-y-8 text-base flex flex-col h-full text-slate-900">
+                                        <div className="space-y-8 text-base flex flex-col h-full print:h-auto print:block text-slate-900">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6 text-lg">
                                                 <tbody>
@@ -577,7 +594,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
                                             
                                             {/* 본인 수령증 구역 (빈칸 분리) */}
-                                            <div className="border-2 border-dashed border-black p-8 mt-auto print:mt-24 bg-slate-50 w-full text-left">
+                                            <div className="border-2 border-dashed border-black p-8 mt-auto print:mt-12 bg-slate-50 w-full text-left print:break-inside-avoid">
                                                 <h3 className="font-bold text-center text-xl mb-6">[ 본 인 수 령 증 ]</h3>
                                                 <p className="text-base mb-10 text-center">본인은 상기 연차유급휴가 사용 촉구서를 틀림없이 수령하였습니다.</p>
                                                 <div className="flex flex-col gap-10 text-lg px-8">
@@ -594,7 +611,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-8 text-base flex flex-col h-full text-slate-900">
+                                        <div className="space-y-8 text-base flex flex-col h-full print:h-auto print:block text-slate-900">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6 text-lg">
                                                 <tbody>
@@ -612,7 +629,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <div className="text-right mt-8 text-xl font-black mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 
                                             {/* 본인 수령증 구역 (빈칸 분리) */}
-                                            <div className="border-2 border-dashed border-black p-8 mt-auto print:mt-24 bg-slate-50 w-full text-left">
+                                            <div className="border-2 border-dashed border-black p-8 mt-auto print:mt-12 bg-slate-50 w-full text-left print:break-inside-avoid">
                                                 <h3 className="font-bold text-center text-xl mb-6">[ 본 인 수 령 증 ]</h3>
                                                 <p className="text-base mb-10 text-center">본인은 상기 연차유급휴가 사용시기 지정 통지문을 틀림없이 수령하였습니다.</p>
                                                 <div className="flex flex-col gap-10 text-lg px-8">
@@ -637,10 +654,19 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
             </div>
             <style dangerouslySetInnerHTML={{ __html: `
                  @media print { 
-                     @page { size: A4 portrait; margin: 15mm; } 
+                     @page { size: A4 portrait; margin: 10mm; } 
+                     html, body { height: auto !important; overflow: visible !important; background: white !important; }
                      body * { visibility: hidden !important; }
-                     .fixed.inset-0, .fixed.inset-0 * { visibility: visible !important; }
-                     .fixed.inset-0 { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; }
+                     #print-area, #print-area * { visibility: visible !important; }
+                     #print-area {
+                         position: absolute !important;
+                         left: 0 !important;
+                         top: 0 !important;
+                         width: 100% !important;
+                         margin: 0 !important;
+                         padding: 0 !important;
+                         height: auto !important;
+                     }
                  }
             `}} />
         </div>
@@ -820,11 +846,11 @@ function AdminView() {
                             <form onSubmit={handleEmpSubmit} className="space-y-4 text-sm">
                                 <div><label className="block font-bold mb-1">사원번호</label><input required disabled={!!editingEmpId} type="text" value={empForm.empId} onChange={e => setEmpForm({ ...empForm, empId: e.target.value })} className="w-full border p-2 rounded disabled:bg-slate-200" placeholder="예: 2026001" /></div>
                                 <div><label className="block font-bold mb-1">부서명</label><select value={empForm.dept} onChange={e => setEmpForm({ ...empForm, dept: e.target.value })} className="w-full border p-2 rounded">{departments.map(d => <option key={d} value={d}>{d}</option>)}</select></div>
-                                <div><label className="block font-bold mb-1">성명</label><input required type="text" value={empForm.name} onChange={e => setEmpForm({ ...empForm, name: e.target.value })} className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 암호화)" /></div>
-                                {!editingEmpId && <div><label className="block font-bold mb-1">초기 비밀번호 (직원 접속용)</label><input type="text" value={empForm.pw} onChange={e => setEmpForm({ ...empForm, pw: e.target.value })} className="w-full border p-2 rounded" /></div>}
+                                <div><label className="block font-bold mb-1">성명</label><input required type="text" autoComplete="off" autoCorrect="off" spellCheck="false" value={empForm.name} onChange={e => setEmpForm({ ...empForm, name: e.target.value })} className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 암호화)" /></div>
+                                {!editingEmpId && <div><label className="block font-bold mb-1">초기 비밀번호 (직원 접속용)</label><input type="text" autoComplete="off" spellCheck="false" value={empForm.pw} onChange={e => setEmpForm({ ...empForm, pw: e.target.value })} className="w-full border p-2 rounded" /></div>}
                                 <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={empForm.gender === '남성'} onChange={() => setEmpForm({ ...empForm, gender: '남성' })} /> 남성</label><label><input type="radio" checked={empForm.gender === '여성'} onChange={() => setEmpForm({ ...empForm, gender: '여성' })} /> 여성</label></div></div>
                                 <div><label className="block font-bold mb-1">입사일 (기준일)</label><input required type="date" value={empForm.joinDate} onChange={e => setEmpForm({ ...empForm, joinDate: e.target.value })} className="w-full border p-2 rounded" /></div>
-                                <div><label className="block font-bold mb-1">비고</label><input type="text" value={empForm.remark} onChange={e => setEmpForm({ ...empForm, remark: e.target.value })} className="w-full border p-2 rounded" /></div>
+                                <div><label className="block font-bold mb-1">비고</label><input type="text" autoComplete="off" spellCheck="false" value={empForm.remark} onChange={e => setEmpForm({ ...empForm, remark: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 <div className="flex gap-2 pt-2">
                                     {editingEmpId && <button type="button" onClick={() => { setEditingEmpId(null); setEmpForm({ empId: '', dept: departments[0], name: '', gender: '남성', joinDate: '', remark: '', pw: '1234' }); }} className="flex-1 bg-slate-300 text-slate-700 py-2.5 rounded font-bold hover:bg-slate-400">취소</button>}
                                     <button type="submit" className="flex-1 bg-indigo-600 text-white py-2.5 rounded font-bold hover:bg-indigo-700">{editingEmpId ? '수정하기' : '등록하기'}</button>
@@ -883,7 +909,7 @@ function AdminView() {
                                 <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={proxyLeave.empId} onChange={e=>setProxyLeave({...proxyLeave, empId:e.target.value})}><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}</select>
                                 <input type="date" className="border p-1.5 rounded bg-white" value={proxyLeave.date} onChange={e=>setProxyLeave({...proxyLeave, date:e.target.value})}/>
                                 <select className="border p-1.5 rounded w-20 bg-white" value={proxyLeave.days} onChange={e=>setProxyLeave({...proxyLeave, days:e.target.value})}>{[0.5,1,2,3,4,5,6,7,8,9,10].map(d=><option key={d} value={d}>{d}일</option>)}</select>
-                                <input type="text" className="border p-1.5 rounded w-32 md:w-48 bg-white" placeholder="사유 (대리신청)" value={proxyLeave.remark} onChange={e=>setProxyLeave({...proxyLeave, remark:e.target.value})}/>
+                                <input type="text" autoComplete="off" spellCheck="false" className="border p-1.5 rounded w-32 md:w-48 bg-white" placeholder="사유 (대리신청)" value={proxyLeave.remark} onChange={e=>setProxyLeave({...proxyLeave, remark:e.target.value})}/>
                                 <button onClick={handleProxySubmit} className="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-indigo-700 shrink-0">등록</button>
                             </div>
 
@@ -957,21 +983,21 @@ function AdminView() {
                         <div className="w-full lg:w-1/2 bg-slate-50 p-4 md:p-6 rounded border space-y-8 h-fit">
                             <div>
                                 <h2 className="text-lg font-bold mb-4">부서 관리</h2>
-                                <div className="flex gap-2 mb-4"><input type="text" value={newDept} onChange={e=>setNewDept(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 부서명"/><button onClick={()=>{if(!newDept)return; dbUpdateSettings('departments', [...departments, newDept]); setNewDept(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
+                                <div className="flex gap-2 mb-4"><input type="text" autoComplete="off" spellCheck="false" value={newDept} onChange={e=>setNewDept(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 부서명"/><button onClick={()=>{if(!newDept)return; dbUpdateSettings('departments', [...departments, newDept]); setNewDept(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
                                 <div className="flex flex-wrap gap-2">{departments.map((d,i)=><div key={`dept-${i}`} className="bg-white border px-3 py-1 rounded text-sm flex gap-2 items-center">{d}<button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('departments', departments.filter(x=>x!==d)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                             </div>
                             <div className="border-t pt-8 border-slate-200">
                                 <h2 className="text-lg font-bold mb-4">관리자 비밀번호 변경</h2>
-                                <div className="flex gap-2"><input type="text" value={newPw} onChange={e=>setNewPw(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/><button onClick={()=>{if(!newPw)return; dbUpdateSettings('adminPassword', newPw); setNewPw(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
+                                <div className="flex gap-2"><input type="text" autoComplete="off" spellCheck="false" value={newPw} onChange={e=>setNewPw(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="새 비밀번호 입력"/><button onClick={()=>{if(!newPw)return; dbUpdateSettings('adminPassword', newPw); setNewPw(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
                             </div>
                             <div className="border-t pt-8 border-slate-200">
                                 <h2 className="text-lg font-bold mb-4">회사명 설정</h2>
-                                <div className="flex gap-2"><input type="text" value={newCompany} onChange={e=>setNewCompany(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder={`현재: ${companyName}`}/><button onClick={()=>{if(!newCompany)return; dbUpdateSettings('companyName', newCompany); setNewCompany(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
+                                <div className="flex gap-2"><input type="text" autoComplete="off" spellCheck="false" value={newCompany} onChange={e=>setNewCompany(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder={`현재: ${companyName}`}/><button onClick={()=>{if(!newCompany)return; dbUpdateSettings('companyName', newCompany); setNewCompany(''); showToast('변경됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">변경</button></div>
                             </div>
                         </div>
                         <div className="w-full lg:w-1/2 bg-slate-50 p-4 md:p-6 rounded border h-fit">
                             <h2 className="text-lg font-bold mb-4">신청서 결재란 설정</h2>
-                            <div className="flex gap-2 mb-4"><input type="text" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; dbUpdateSettings('approvalLine', [...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
+                            <div className="flex gap-2 mb-4"><input type="text" autoComplete="off" spellCheck="false" value={newTitle} onChange={e=>setNewTitle(e.target.value)} className="flex-1 border p-2 rounded text-sm" placeholder="직책명 (예: 팀장)"/><button onClick={()=>{if(!newTitle)return; dbUpdateSettings('approvalLine', [...approvalLine, newTitle]); setNewTitle(''); showToast('추가됨');}} className="bg-indigo-600 text-white px-4 rounded font-bold text-sm">추가</button></div>
                             <div className="space-y-2">{approvalLine.map((l,i)=><div key={`appr-${i}`} className="bg-white border p-3 rounded flex justify-between items-center"><span className="font-bold">{i+1}. {l}</span><button onClick={()=>{showConfirm('삭제하시겠습니까?', () => dbUpdateSettings('approvalLine', approvalLine.filter((_,idx)=>idx!==i)))}} className="text-red-500 font-bold">&times;</button></div>)}</div>
                         </div>
                     </div>
@@ -1038,7 +1064,7 @@ function UserView() {
                         <div className="space-y-4 text-sm">
                             <div><label className="block font-bold mb-1">시작일</label><input required type="date" value={applyDate} onChange={e => setApplyDate(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" /></div>
                             <div><label className="block font-bold mb-1">사용 기간</label><select value={applyDays} onChange={e => setApplyDays(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50">{[0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => <option key={`day-${d}`} value={d}>{d}일간</option>)}</select></div>
-                            <div><label className="block font-bold mb-1">사유/적요</label><input type="text" value={applyRemark} onChange={e => setApplyRemark(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" /></div>
+                            <div><label className="block font-bold mb-1">사유/적요</label><input type="text" autoComplete="off" autoCorrect="off" spellCheck="false" value={applyRemark} onChange={e => setApplyRemark(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" /></div>
                             <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold shadow hover:bg-indigo-700 transition">신청하기</button>
                         </div>
                     </form>

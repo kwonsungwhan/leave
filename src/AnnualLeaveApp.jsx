@@ -47,11 +47,8 @@ const addYearsExact = (dateStr, years) => {
 const ENCRYPT_KEY = "LEAVE_APP_SECURE_2026";
 const encryptName = (name) => {
     if (!name) return "";
-    try {
-        return btoa(encodeURIComponent(name + "_" + ENCRYPT_KEY));
-    } catch (e) {
-        return name;
-    }
+    try { return btoa(encodeURIComponent(name + "_" + ENCRYPT_KEY)); } 
+    catch (e) { return name; }
 };
 
 const decryptName = (encoded) => {
@@ -62,9 +59,7 @@ const decryptName = (encoded) => {
             return decoded.replace("_" + ENCRYPT_KEY, "");
         }
         return encoded;
-    } catch (e) {
-        return encoded;
-    }
+    } catch (e) { return encoded; }
 };
 
 const maskName = (name) => {
@@ -183,30 +178,23 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
-    // 🕒 매일 자정(24시) 연도 기준 4년 초과 데이터 자동 영구 삭제
+    // 🕒 4년 데이터 자동 삭제
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0) return;
-
         const checkAndPurgeFourYearOldData = async () => {
             const currentYear = new Date().getFullYear();
-            const cutoffYear = currentYear - 4; // 예: 2026년 기준 2022년
-
+            const cutoffYear = currentYear - 4;
             try {
                 for (const rec of leaveRecords) {
                     if (!rec.date) continue;
                     const recYear = parseInt(rec.date.split('-')[0], 10);
-                    // 4년 전 '연도'보다 과거의 데이터 (예: 2021년, 2020년 등) 강제 삭제
                     if (recYear < cutoffYear) {
                         await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
                     }
                 }
-            } catch (err) {
-                console.error("오래된 데이터 자동 청소 에러:", err);
-            }
+            } catch (err) { console.error("오래된 데이터 자동 청소 에러:", err); }
         };
-
         checkAndPurgeFourYearOldData();
-
         const scheduleMidnightCheck = () => {
             const now = new Date();
             const millisTillMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0) - now;
@@ -215,20 +203,18 @@ export default function AnnualLeaveApp() {
                 scheduleMidnightCheck();
             }, millisTillMidnight);
         };
-
         const timerId = scheduleMidnightCheck();
         return () => clearTimeout(timerId);
     }, [isReady, leaveRecords]);
 
+    // 연차 자동 발생 로직
     useEffect(() => {
         const syncAutoLeave = async () => {
             if (!isReady || employees.length === 0) return;
             const today = new Date();
-            
             for (const emp of employees) {
                 if (!emp.joinDate) continue;
                 const joinDateStr = emp.joinDate;
-                
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     if (today >= new Date(targetDateStr)) {
@@ -239,18 +225,12 @@ export default function AnnualLeaveApp() {
                             isAuto: true, isFulfilled: true, empId: emp.empId,
                             dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
                         };
-                        try {
-                            await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), recordData, { merge: true });
-                        } catch (e) {
-                            console.error("자동 발생 에러", e);
-                        }
+                        try { await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), recordData, { merge: true }); } catch (e) { console.error(e); }
                     }
                 }
-
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
-                
                 if (years >= 1) {
                     for (let y = 1; y <= Math.floor(years); y++) {
                         const targetDateStr = addYearsExact(joinDateStr, y);
@@ -265,17 +245,12 @@ export default function AnnualLeaveApp() {
                                 isAuto: true, isFulfilled: true, empId: emp.empId,
                                 dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false 
                             };
-                            try {
-                                await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), recordData, { merge: true });
-                            } catch (e) {
-                                console.error("자동 발생 에러", e);
-                            }
+                            try { await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), recordData, { merge: true }); } catch (e) { console.error(e); }
                         }
                     }
                 }
             }
         };
-        
         syncAutoLeave();
     }, [isReady, employees]);
 
@@ -283,7 +258,6 @@ export default function AnnualLeaveApp() {
         await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });
     };
 
-    // 불필요한 렌더링으로 인한 자원 낭비 방지
     const ctx = useMemo(() => ({
         user, setUser, employees, departments, leaveRecords, adminPassword, approvalLine, companyName, 
         showToast, showConfirm, dbUpdateSettings, publicPath
@@ -308,7 +282,7 @@ function LoginView() {
     const [mode, setMode] = useState('user');
     const [dept, setDept] = useState(departments[0] || '');
     
-    // 💡 모바일 한글 입력 버그 원천 차단: React 상태(State) 대신 순수 HTML 참조(Ref) 방식 사용
+    // 💡 모바일 한글 입력 씹힘 방지: 상태(useState) 대신 참조(useRef) 사용
     const nameRef = React.useRef(null);
     const pwRef = React.useRef(null);
 
@@ -317,7 +291,6 @@ function LoginView() {
     const handleLogin = (e) => {
         e.preventDefault();
         
-        // 제출 시점에만 입력값을 가져옴 (입력 중에는 React가 간섭하지 않음)
         const inputName = nameRef.current?.value || '';
         const inputPw = pwRef.current?.value || '';
 
@@ -355,14 +328,12 @@ function LoginView() {
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-slate-500 mb-1">성명</label>
-                                {/* 💡 비제어 컴포넌트(ref) 적용 */}
                                 <input required type="text" ref={nameRef} className="w-full p-3 border rounded bg-white focus:border-indigo-500 outline-none" placeholder="본명 입력" />
                             </div>
                         </>
                     )}
                     <div>
                         <label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 {mode === 'user' && <span className="text-slate-400 font-normal">(초기: 1234)</span>}</label>
-                        {/* 💡 비제어 컴포넌트(ref) 적용 */}
                         <input required type="password" ref={pwRef} className="w-full p-3 border rounded bg-white focus:border-indigo-500 outline-none" />
                     </div>
                     <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3 rounded shadow hover:bg-indigo-700">로그인</button>
@@ -617,7 +588,7 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                                 </tbody>
                                             </table>
                                             <p className="leading-relaxed text-justify mt-4">
-                                                「근로기준법 제61조」에 의거하여, 귀하의 미사용 연차 유급휴가 일수를 위와 같이 통지하오니, 
+                                                귀하는 「근로기준법 제61조」에 의거하여, 귀하의 미사용 연차 유급휴가 일수를 위와 같이 통지하오니, 
                                                 본 통지서를 수령한 날로부터 <strong>10일 이내</strong>에 미사용 연차 유급휴가의 사용 시기를 정하여 회사에 서면으로 통보하여 주시기 바랍니다.
                                             </p>
                                             <p className="leading-relaxed text-justify">
@@ -863,7 +834,7 @@ function AdminView() {
             <EditRecordModal record={editingRecord} onSave={handleSaveRecord} onClose={() => setEditingRecord(null)} />
             {promoModalOpen && <PrintPromotionModal allEmployees={employees} records={leaveRecords} onClose={()=>setPromoModalOpen(false)} />}
             
-            {/* 💻 실제 앱 UI (인쇄 시 이 부분은 완전히 숨겨짐 - 백지 방지 핵심) */}
+            {/* 💻 실제 앱 UI (인쇄 시 숨김 처리하여 백지 방지) */}
             <div className="print:hidden flex flex-col flex-1 w-full min-h-0 gap-2 md:gap-4">
                 <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0">
                     <div className="flex items-center gap-2 font-black text-slate-700 text-lg"><Icons.Briefcase /> 관리자 시스템 (서버 연결됨)</div>
@@ -988,7 +959,7 @@ function AdminView() {
                                                         {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="block w-full text-xs bg-indigo-100 text-indigo-700 px-2 py-1.5 rounded border border-indigo-200 font-bold hover:bg-indigo-200">신청서</button>}
                                                         
                                                         {r.type === '발생' ? (
-                                                            // 발생 데이터: 영구 삭제 가능
+                                                            // 발생 데이터: 관리자만 영구 삭제 가능
                                                             <button onClick={()=>{
                                                                 showConfirm('이 발생 기록을 완전히 영구 삭제하시겠습니까?', async () => {
                                                                     try {
@@ -998,7 +969,7 @@ function AdminView() {
                                                                 });
                                                             }} className="block w-full text-xs bg-red-100 text-red-700 px-2 py-1.5 rounded border border-red-300 font-bold hover:bg-red-200 mt-1">영구 삭제</button>
                                                         ) : (
-                                                            // 사용 데이터: 영구 삭제 불가, 오직 취소(줄긋기)만 가능
+                                                            // 사용 데이터: 관리자/사용자 모두 영구 삭제 불가, 오직 취소(줄긋기)만 가능
                                                             !r.isCanceled && (
                                                                 <button onClick={()=>{
                                                                     showConfirm('이 사용 내역을 취소(줄긋기) 처리하시겠습니까?', async () => {
@@ -1057,7 +1028,7 @@ function UserView() {
     const [applyDays, setApplyDays] = useState(1);
     const [printModal, setPrintModal] = useState(null);
     
-    // 💡 모바일 한글 입력 버그 원천 차단: React 상태(State) 대신 순수 HTML 참조(Ref) 방식 사용
+    // 💡 모바일 한글 입력 씹힘 방지: 상태(useState) 대신 참조(useRef) 사용
     const remarkRef = React.useRef(null);
 
     const userRecords = leaveRecords.filter(r => r.empId === user.empId).sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1069,7 +1040,6 @@ function UserView() {
         e.preventDefault();
         if (!applyDate) return;
         
-        // 제출 시점에만 입력값을 가져옴 (입력 중에는 React가 간섭하지 않음)
         const applyRemark = remarkRef.current?.value || '';
         
         const newId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -1094,7 +1064,7 @@ function UserView() {
             {/* 🖨️ 인쇄 모달 */}
             <PrintApplicationModal record={printModal} user={user} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
             
-            {/* 💻 실제 앱 UI (인쇄 시 이 부분 숨겨짐) */}
+            {/* 💻 실제 앱 UI (인쇄 시 숨김 처리하여 백지 방지) */}
             <div className="print:hidden flex flex-col flex-1 w-full min-h-0 gap-2 md:gap-4">
                 <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0">
                     <div className="flex items-center gap-2 font-black text-indigo-700 text-lg"><Icons.Calendar /> 연차 관리 시스템 (서버 연결됨)</div>
@@ -1119,7 +1089,6 @@ function UserView() {
                                 <div><label className="block font-bold mb-1">사용 기간</label><select value={applyDays} onChange={e => setApplyDays(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50">{[0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => <option key={`day-${d}`} value={d}>{d}일간</option>)}</select></div>
                                 <div>
                                     <label className="block font-bold mb-1">사유/적요</label>
-                                    {/* 💡 비제어 컴포넌트(ref) 적용 */}
                                     <input type="text" ref={remarkRef} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" />
                                 </div>
                                 <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold shadow hover:bg-indigo-700 transition">신청하기</button>
@@ -1148,7 +1117,7 @@ function UserView() {
                                             <td className={`p-3 min-w-[150px] ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}</td>
                                             <td className="p-3 text-center space-y-1 whitespace-nowrap">
                                                 {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="w-full block text-xs border border-indigo-200 text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded mb-1 font-bold hover:bg-indigo-100">신청서</button>}
-                                                {/* 사용 데이터(본인 신청): 삭제 불가능, 취소(줄긋기)만 가능하도록 적용 */}
+                                                {/* 사용 데이터(본인 신청): 영구 삭제 불가능, 취소(줄긋기)만 가능하도록 엄격히 제한 */}
                                                 {!r.isAuto && r.type==='사용' && !r.isCanceled && (
                                                     <button onClick={()=>{
                                                         showConfirm('신청을 취소하시겠습니까?', async () => {

@@ -43,6 +43,29 @@ const addYearsExact = (dateStr, years) => {
     return `${y + years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 };
 
+// 입사일 기준 이번 턴(주기)의 연차 시작일 계산 (핵심 로직)
+const getAnnualLeaveCycleStart = (joinDateStr, targetDateObj = new Date()) => {
+    if (!joinDateStr) return '1900-01-01';
+    const [jy, jm, jd] = joinDateStr.split('-').map(Number);
+    const joinDate = new Date(jy, jm - 1, jd);
+    
+    // 1년 미만인 경우 입사일이 주기 시작일
+    const oneYearAfterJoin = new Date(jy + 1, jm - 1, jd);
+    if (targetDateObj < oneYearAfterJoin) {
+        return joinDateStr; 
+    }
+
+    const targetYear = targetDateObj.getFullYear();
+    const anniversaryThisYear = new Date(targetYear, jm - 1, jd);
+    
+    // 타겟 날짜가 올해 입사일(갱신일) 전이라면, 작년 갱신일이 시작점
+    if (targetDateObj < anniversaryThisYear) {
+        return `${targetYear - 1}-${String(jm).padStart(2, '0')}-${String(jd).padStart(2, '0')}`;
+    }
+    // 타겟 날짜가 올해 입사일 이후라면, 올해 갱신일이 시작점
+    return `${targetYear}-${String(jm).padStart(2, '0')}-${String(jd).padStart(2, '0')}`;
+};
+
 const ENCRYPT_KEY = "LEAVE_APP_SECURE_2026";
 const encryptName = (name) => {
     if (!name) return "";
@@ -164,7 +187,7 @@ export default function AnnualLeaveApp() {
                 const d = snap.data();
                 setDepartments(d.departments || ['관리소', '경비반', '미화반']);
                 
-                // 💡 연차 강제 고정 및 1순위 배치
+                // 연차 강제 고정 및 1순위 배치
                 let fetchedLeaveTypes = d.leaveTypes || ['연차', '하계휴가', '경조휴가', '병가', '공가', '특별휴가'];
                 fetchedLeaveTypes = fetchedLeaveTypes.filter(t => t !== '연차');
                 fetchedLeaveTypes.unshift('연차'); 
@@ -208,7 +231,7 @@ export default function AnnualLeaveApp() {
                     if (!rec.date) continue;
                     const recDate = new Date(rec.date);
                     recDate.setHours(0, 0, 0, 0);
-                    // 만 4년이 지난 데이터 영구 삭제
+                    // 만 4년이 지난 데이터 (24시 기준) 영구 삭제
                     if (recDate <= fourYearsAgo) {
                         await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
                     }
@@ -310,12 +333,16 @@ export default function AnnualLeaveApp() {
                     }
                 }
 
-                // 3. 고아 데이터(유령 연차) 자동 삭제
+                // 3. 고아 데이터(유령 연차) 자동 삭제 로직 개선
                 try {
                     const q = query(collection(db, publicPath, 'leaveRecords'), where("empId", "==", emp.empId), where("isAuto", "==", true));
                     const querySnapshot = await getDocs(q);
                     querySnapshot.forEach(async (docSnap) => {
-                        if (!expectedAutoIds.has(docSnap.id)) {
+                        const rec = docSnap.data();
+                        const recDate = new Date(rec.date);
+                        recDate.setHours(0, 0, 0, 0);
+                        // 이전에 생성된 기록 중 기준 입사일에 맞지 않는 유령 데이터 삭제 (2년 컷오프 안쪽이면서 expected에 없는 경우)
+                        if (recDate >= cutoffForGeneration && !expectedAutoIds.has(docSnap.id)) {
                             await deleteDoc(doc(db, publicPath, 'leaveRecords', docSnap.id));
                         }
                     });
@@ -483,13 +510,13 @@ const PrintSummaryModal = ({ employee, records, baseDate, onClose }) => {
     if (!employee) return null;
     const decryptedEmpName = decryptName(employee.realName);
 
-    // 기록을 바탕으로 모든 휴가 종류 통계 집계
     const stats = {};
     const targetDate = baseDate ? new Date(baseDate) : new Date();
     const thisYear = targetDate.getFullYear();
-    const oneYearAgo = new Date(targetDate.getFullYear() - 1, targetDate.getMonth(), targetDate.getDate());
-    const oneYearAgoStr = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}-${String(oneYearAgo.getDate()).padStart(2, '0')}`;
     const targetDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+    
+    // 입사일 주기(Anniversary Cycle) 시작점 계산
+    const cycleStartStr = getAnnualLeaveCycleStart(employee.joinDate, targetDate);
 
     if (records && records.length > 0) {
         records.forEach(r => {
@@ -499,16 +526,16 @@ const PrintSummaryModal = ({ employee, records, baseDate, onClose }) => {
             const recYear = r.date ? parseInt(r.date.substring(0, 4), 10) : thisYear;
 
             if (!r.isCanceled && (!r.isAuto || r.isFulfilled)) {
-                // 기준일(targetDateStr) 이후의 미래 데이터는 집계에서 제외
-                if (r.date > targetDateStr) return;
+                if (r.date > targetDateStr) return; // 미래 제외
 
-                // 연차는 딱 1년 전 데이터까지만, 기타 휴가는 당해 연도만 집계
                 if (typeName === '연차') {
-                    if (r.date >= oneYearAgoStr) {
+                    // 입사일 기준 최근 주기(Cycle) 내의 기록만 집계
+                    if (r.date >= cycleStartStr) {
                         if (r.type === '발생') stats[typeName].gen += r.days;
                         if (r.type === '사용') stats[typeName].used += r.days;
                     }
                 } else {
+                    // 기타 휴가는 해당 연도 1월 1일 기준
                     if (recYear === thisYear) {
                         if (r.type === '발생') stats[typeName].gen += r.days;
                         if (r.type === '사용') stats[typeName].used += r.days;
@@ -517,18 +544,15 @@ const PrintSummaryModal = ({ employee, records, baseDate, onClose }) => {
             }
         });
     } else {
-        // 기록이 전혀 없을 경우 기본 연차 0일 표시
         stats['연차'] = { gen: 0, used: 0 };
     }
 
     const renderStats = () => {
-        // '연차'가 항상 배열의 첫 번째에 오도록 정렬
         const types = Object.keys(stats).sort((a, b) => a === '연차' ? -1 : (b === '연차' ? 1 : 0));
         
         return types.map(type => {
             const s = stats[type];
             const remain = s.gen - s.used;
-            // '휴가'가 단어 끝에 없으면 붙여서 표시 (예: 병가 -> 병가내역, 특별 -> 특별휴가내역)
             const displayName = type.endsWith('휴가') || type.endsWith('가') ? type : `${type}휴가`;
             
             return (
@@ -559,7 +583,6 @@ const PrintSummaryModal = ({ employee, records, baseDate, onClose }) => {
                     <div className="font-bold text-lg bg-slate-100 px-4 py-2 border rounded">{employee.dept} / {decryptedEmpName}</div>
                 </div>
                 
-                {/* 통계 요약 구역: 박스 형태에서 한 줄 텍스트 형태로 통일 */}
                 <div className="mb-6 border-2 border-slate-300 p-5 rounded-lg bg-slate-50 space-y-3">
                     {renderStats()}
                 </div>
@@ -598,12 +621,9 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     if (!allEmployees) return null;
 
     const calculateStatus = (emp) => {
-        const today = new Date();
-        const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
-        const oneYearAgoStr = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}-${String(oneYearAgo.getDate()).padStart(2, '0')}`;
+        const cycleStartStr = getAnnualLeaveCycleStart(emp.joinDate);
         
-        // 연차 촉구서이므로 1년 이내의 연차만 계산
-        const myRecords = records.filter(r => r.empId === emp.empId && (r.typeCategory||r.kind||r.category||r.leaveType||'연차') === '연차' && r.date >= oneYearAgoStr);
+        const myRecords = records.filter(r => r.empId === emp.empId && (r.typeCategory||r.kind||r.category||r.leaveType||'연차') === '연차' && r.date >= cycleStartStr);
         const gen = myRecords.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)).reduce((acc, r) => acc + r.days, 0);
         const used = myRecords.filter(r => r.type === '사용' && !r.isCanceled).reduce((acc, r) => acc + r.days, 0);
         return { gen, used, remain: gen - used };
@@ -808,7 +828,6 @@ function AdminView() {
     const [filterDept, setFilterDept] = useState('');
     const [filterName, setFilterName] = useState('');
     
-    // 기준일 상태값 추가 (기본값: 오늘)
     const [summaryBaseDate, setSummaryBaseDate] = useState(() => {
         const today = new Date();
         return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -899,12 +918,10 @@ function AdminView() {
         
         const today = new Date();
         const thisYear = today.getFullYear();
-        const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
-        const oneYearAgoStr = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}-${String(oneYearAgo.getDate()).padStart(2, '0')}`;
+        const cycleStartStr = getAnnualLeaveCycleStart(emp.joinDate);
 
-        // 연차는 딱 1년 전 데이터만, 기타 휴가는 당해 연도만 합산
-        const gen = empRecords.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled) && (leaveType === '연차' ? r.date >= oneYearAgoStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
-        const used = empRecords.filter(r => r.type === '사용' && !r.isCanceled && (leaveType === '연차' ? r.date >= oneYearAgoStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
+        const gen = empRecords.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled) && (leaveType === '연차' ? r.date >= cycleStartStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
+        const used = empRecords.filter(r => r.type === '사용' && !r.isCanceled && (leaveType === '연차' ? r.date >= cycleStartStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
         
         if (gen - used < days) return showToast(`[휴가 한도 초과] 잔여 ${leaveType} 일수가 부족합니다. (잔여: ${gen - used}일)`, 'error');
 
@@ -1164,16 +1181,14 @@ function UserView() {
 
     const getBalances = () => {
         const balances = {};
-        const today = new Date();
-        const thisYear = today.getFullYear();
-        const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
-        const oneYearAgoStr = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}-${String(oneYearAgo.getDate()).padStart(2, '0')}`;
+        const thisYear = new Date().getFullYear();
+        const cycleStartStr = getAnnualLeaveCycleStart(user.joinDate);
 
         leaveTypes.forEach(type => {
             const myR = userRecords.filter(r => (r.typeCategory||r.kind||r.category||r.leaveType||'연차') === type);
-            // 연차는 딱 1년 전 데이터만 합산, 기타 휴가는 당해 연도만 합산
-            const gen = myR.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled) && (type === '연차' ? r.date >= oneYearAgoStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
-            const used = myR.filter(r => r.type === '사용' && !r.isCanceled && (type === '연차' ? r.date >= oneYearAgoStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
+            // 연차는 입사일 주기(Cycle) 기준, 기타 휴가는 당해 연도만 합산
+            const gen = myR.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled) && (type === '연차' ? r.date >= cycleStartStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
+            const used = myR.filter(r => r.type === '사용' && !r.isCanceled && (type === '연차' ? r.date >= cycleStartStr : r.date?.startsWith(thisYear.toString()))).reduce((a, b) => a + b.days, 0);
             balances[type] = { gen, used, remain: gen - used };
         });
         return balances;

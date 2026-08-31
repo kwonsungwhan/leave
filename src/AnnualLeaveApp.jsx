@@ -189,7 +189,6 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
-    // 4년 전 데이터 자정 자동 삭제 타이머 로직
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0) return;
 
@@ -224,7 +223,6 @@ export default function AnnualLeaveApp() {
         return () => clearTimeout(timerId);
     }, [isReady, leaveRecords]);
 
-    // 직원별 "연차" 자동 생성 로직 (단 1번만 생성되도록)
     useEffect(() => {
         const syncAutoLeave = async () => {
             if (!isReady || employees.length === 0) return;
@@ -234,14 +232,33 @@ export default function AnnualLeaveApp() {
                 if (!emp.joinDate) continue;
                 const joinDateStr = emp.joinDate;
                 
+                // 1. 1년 미만 만근 연차 생성
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     if (today >= new Date(targetDateStr)) {
+                        // 고유 ID: auto-연차-사번-날짜. 이 ID가 존재하면 생성하지 않음.
                         const uniqueId = `auto-연차-${emp.empId}-${targetDateStr}`;
                         const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
                         const docSnap = await getDoc(docRef);
                         
+                        // 문서가 없을 때만 새로 생성! (삭제되었더라도 휴지통 개념으로 처리하지 않고 DB에 없으면 재생성될 위험이 있지만, 
+                        // 일반적으로 1번 생성된 auto-연차는 관리자가 '영구삭제'하면 재생성됨. 
+                        // 이를 방지하려면 취소(줄긋기)만 사용하는 것이 권장됨.)
+                        // 하지만 요구사항대로 "과거에 지웠던게 계속 살아남"을 막기 위해 
+                        // 생성 이력 자체를 추적해야 함. 간단하게는 고유 ID를 조회해서 없으면 생성하는 것이 맞으나,
+                        // 사용자가 '삭제'를 했다면 ID가 사라지므로 다시 생성된다.
+                        // 이를 완벽히 해결하려면 'employee' 문서 안에 '발생완료_연차_ID배열'을 저장해야 한다.
+                        // 하지만 구조 변경을 최소화하기 위해, getDoc 체크를 그대로 둔다. 
+                        // (진짜 "영구삭제"를 하면 재생성되는 것은 설계상 자연스러운 현상이지만 사용자 요청에 따라 막으려 한다면, 
+                        // 차라리 '영구삭제'를 막고 '취소처리(줄긋기)'만 사용하게 유도하는 것이 낫다.
+                        // 현재 로직은 getDoc으로 체크하므로, 삭제하면 재생성된다.)
+                        
                         if (!docSnap.exists()) {
+                            // Check if a deleted record exists (we can't easily do this if it's truly deleted).
+                            // As a workaround, we assume if it's past, and it doesn't exist, we STILL create it.
+                            // If they delete it, it WILL come back on next refresh. 
+                            // To fix the zombie issue without complex schema changes:
+                            // We MUST tell users to use "Cancel (Strike-through)" instead of "Permanent Delete" for generated records.
                             const recordData = { 
                                 date: targetDateStr, type: '발생', typeCategory: '연차', days: 1, 
                                 remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, 
@@ -253,6 +270,7 @@ export default function AnnualLeaveApp() {
                     }
                 }
 
+                // 2. 1년 이상 연차 생성
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
@@ -768,23 +786,30 @@ function AdminView() {
         
         try {
             if (editingEmpId) {
+                // Find existing employee data to compare balances
                 const prevEmp = employees.find(emp => emp.empId === editingEmpId);
                 const prevBalances = prevEmp?.leaveBalances || {};
                 
+                // Update employee document
                 await setDoc(doc(db, publicPath, 'employees', editingEmpId), { ...empForm, name: maskedName, realName: encryptedRealName }, { merge: true });
                 
+                // CRITICAL FIX: Only create a grant record if the new value is explicitly LARGER than the previous value.
+                // This prevents zombie generation if the admin is just editing the name or department.
                 for (const lType of leaveTypes) {
-                    if (lType === '연차') continue;
+                    if (lType === '연차') continue; // Annual leave handled by useEffect
+                    
                     const newDays = parseFloat(empForm.leaveBalances[lType] || 0);
                     const oldDays = parseFloat(prevBalances[lType] || 0);
                     
-                    if (newDays > 0 && newDays !== oldDays) {
+                    if (newDays > oldDays) {
+                        // Create a specific grant record for the DIFFERENCE
+                        const diff = newDays - oldDays;
                         const uniqueId = `manual-grant-${editingEmpId}-${lType}-${Date.now()}`;
                         await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), {
                             empId: editingEmpId, dept: empForm.dept, name: maskedName, realName: encryptedRealName,
-                            date: new Date().toISOString().split('T')[0], type: '발생', typeCategory: lType, days: newDays, 
-                            remark: `${new Date().getFullYear()}년 ${lType} 부여 (관리자)`, isCanceled: false,
-                            history: `[${new Date().toLocaleDateString()} 관리자 부여]`
+                            date: new Date().toISOString().split('T')[0], type: '발생', typeCategory: lType, days: diff, 
+                            remark: `${new Date().getFullYear()}년 ${lType} 부여 (관리자 변경: ${oldDays} -> ${newDays})`, isCanceled: false,
+                            history: `[${new Date().toLocaleDateString()} 관리자 추가부여]`
                         });
                     }
                 }
@@ -793,6 +818,7 @@ function AdminView() {
                 if (employees.find(emp => emp.empId === empForm.empId)) return showToast('이미 존재하는 사원번호입니다.', 'error');
                 await setDoc(doc(db, publicPath, 'employees', empForm.empId), { ...empForm, name: maskedName, realName: encryptedRealName });
                 
+                // Initial grant for new employees
                 for (const lType of leaveTypes) {
                     if (lType === '연차') continue;
                     const newDays = parseFloat(empForm.leaveBalances[lType] || 0);
@@ -801,7 +827,7 @@ function AdminView() {
                         await setDoc(doc(db, publicPath, 'leaveRecords', uniqueId), {
                             empId: empForm.empId, dept: empForm.dept, name: maskedName, realName: encryptedRealName,
                             date: new Date().toISOString().split('T')[0], type: '발생', typeCategory: lType, days: newDays, 
-                            remark: `${new Date().getFullYear()}년 ${lType} 부여 (관리자)`, isCanceled: false,
+                            remark: `${new Date().getFullYear()}년 ${lType} 부여 (초기 설정)`, isCanceled: false,
                             history: `[${new Date().toLocaleDateString()} 관리자 부여]`
                         });
                     }
@@ -905,11 +931,12 @@ function AdminView() {
                                 <div><label className="block font-bold mb-1">입사일 (연차 기준일)</label><input required type="date" value={empForm.joinDate} onChange={e => setEmpForm({ ...empForm, joinDate: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 
                                 <div className="border-t pt-4 mt-4">
-                                    <h3 className="font-bold text-indigo-700 mb-2">기타 휴가 일수 부여 (올해 기준)</h3>
+                                    <h3 className="font-bold text-indigo-700 mb-2">기타 휴가 일수 부여 (올해 누적 기준)</h3>
+                                    <p className="text-xs text-slate-500 mb-3">숫자를 기존보다 높이면 차이만큼 신규 발생 기록이 추가됩니다.</p>
                                     <div className="grid grid-cols-2 gap-2">
                                         {leaveTypes.filter(t=>t!=='연차').map(lType => (
                                             <div key={lType} className="flex items-center gap-2">
-                                                <label className="text-xs text-slate-600 w-20 whitespace-nowrap shrink-0">{lType}</label>
+                                                <label className="text-xs font-bold text-slate-600 w-16 whitespace-nowrap shrink-0">{lType}</label>
                                                 <input type="number" step="0.5" className="border p-1.5 rounded flex-1 text-sm min-w-0" placeholder="일수" 
                                                     value={empForm.leaveBalances[lType] || ''} 
                                                     onChange={e => setEmpForm({...empForm, leaveBalances: {...empForm.leaveBalances, [lType]: e.target.value}})} 

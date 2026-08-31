@@ -163,7 +163,13 @@ export default function AnnualLeaveApp() {
             if (snap.exists()) {
                 const d = snap.data();
                 setDepartments(d.departments || ['관리소', '경비반', '미화반']);
-                setLeaveTypes(d.leaveTypes || ['연차', '하계휴가', '경조휴가', '병가', '공가', '특별휴가']);
+                
+                // 💡 연차휴가 강제 고정 및 1순위(기본 선택) 배치 로직 추가
+                let fetchedLeaveTypes = d.leaveTypes || ['연차', '하계휴가', '경조휴가', '병가', '공가', '특별휴가'];
+                fetchedLeaveTypes = fetchedLeaveTypes.filter(t => t !== '연차'); // 혹시 뒤섞여있을 연차를 빼내고
+                fetchedLeaveTypes.unshift('연차'); // 무조건 맨 앞(0번 인덱스)에 꽂아 넣습니다.
+                setLeaveTypes(fetchedLeaveTypes);
+
                 setAdminPassword(d.adminPassword || '1234');
                 setApprovalLine(d.approvalLine || ['담 당', '과 장', '소 장']);
                 setCompanyName(d.companyName || '우리회사(주)');

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously } from "firebase/auth";
-import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, getDoc } from "firebase/firestore";
+import { getFirestore, doc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, getDoc, query, where, getDocs } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCMD3R63avtYeb4o7IfOVUoZq_5iT-_QB0",
@@ -234,6 +234,9 @@ export default function AnnualLeaveApp() {
             
             for (const emp of employees) {
                 if (!emp.joinDate) continue;
+                
+                // 현재 입사일 기준으로 '생성되어야만 하는' 올바른 연차 ID 목록
+                const expectedAutoIds = new Set(); 
                 const joinDateStr = emp.joinDate;
                 
                 // 1. 1년 미만 만근 연차 생성
@@ -242,9 +245,10 @@ export default function AnnualLeaveApp() {
                     const targetDate = new Date(targetDateStr);
                     targetDate.setHours(0, 0, 0, 0);
                     
-                    // 발생일이 도래했고(<= 오늘), 발생일이 2년 전보다 최신이거나 같은 경우에만 저장
                     if (targetDate <= today && targetDate >= cutoffForGeneration) {
                         const uniqueId = `auto-연차-${emp.empId}-${targetDateStr}`;
+                        expectedAutoIds.add(uniqueId);
+                        
                         const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
                         const docSnap = await getDoc(docRef);
                         
@@ -264,10 +268,9 @@ export default function AnnualLeaveApp() {
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
                 
-                // 직원의 최대 근속 년수 (현재 연도 - 입사 연도)
                 const currentYear = today.getFullYear();
                 const joinYear = joinD.getFullYear();
-                const maxYears = currentYear - joinYear + 1; // 연차 계산을 위해 넉넉하게 반복
+                const maxYears = currentYear - joinYear + 1;
                 
                 if (maxYears >= 1) {
                     for (let y = 1; y <= maxYears; y++) {
@@ -275,13 +278,14 @@ export default function AnnualLeaveApp() {
                         const targetDate = new Date(targetDateStr);
                         targetDate.setHours(0, 0, 0, 0);
                         
-                        // 발생일이 도래했고(<= 오늘), 2년 전 제한선(cutoff)보다 최신인 경우에만 저장
                         if (targetDate <= today && targetDate >= cutoffForGeneration) {
                             let base = 15;
                             if (y >= 3) base += Math.floor((y - 1) / 2);
                             base = Math.min(base, 25);
                             
                             const uniqueId = `auto-연차-${emp.empId}-${targetDateStr}`;
+                            expectedAutoIds.add(uniqueId);
+
                             const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
                             const docSnap = await getDoc(docRef);
 
@@ -296,6 +300,21 @@ export default function AnnualLeaveApp() {
                             }
                         }
                     }
+                }
+
+                // 3. 고아 데이터(유령 연차) 자동 삭제 로직 추가
+                // 데이터베이스를 조회하여, 방금 계산된 '올바른 연차 목록(expectedAutoIds)'에 없는
+                // 과거의 잔재(예: 입사일 수정 전 데이터)들을 찾아 즉시 영구 삭제합니다.
+                try {
+                    const q = query(collection(db, publicPath, 'leaveRecords'), where("empId", "==", emp.empId), where("isAuto", "==", true));
+                    const querySnapshot = await getDocs(q);
+                    querySnapshot.forEach(async (docSnap) => {
+                        if (!expectedAutoIds.has(docSnap.id)) {
+                            await deleteDoc(doc(db, publicPath, 'leaveRecords', docSnap.id));
+                        }
+                    });
+                } catch (e) {
+                    console.error("유령 데이터 청소 중 오류:", e);
                 }
             }
         };

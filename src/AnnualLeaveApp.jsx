@@ -21,9 +21,6 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// --------------------------------------------------------
-// 공통 아이콘 및 유틸리티
-// --------------------------------------------------------
 const Icons = {
     Briefcase: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
     User: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>,
@@ -98,9 +95,6 @@ const exportCSV = (data, filename) => {
     document.body.removeChild(link);
 };
 
-// --------------------------------------------------------
-// Toast & ConfirmDialog 컴포넌트
-// --------------------------------------------------------
 const Toast = ({ message, type = 'success' }) => {
     if (!message) return null;
     return (
@@ -128,9 +122,6 @@ const ConfirmDialog = ({ open, message, onConfirm, onCancel }) => {
     );
 };
 
-// --------------------------------------------------------
-// 메인 앱 컴포넌트
-// --------------------------------------------------------
 export default function AnnualLeaveApp() {
     const [isReady, setIsReady] = useState(false);
     const [user, setUser] = useState(null);
@@ -155,16 +146,19 @@ export default function AnnualLeaveApp() {
         setConfirmState({ open: true, message, onConfirm });
     };
 
-    // 💡 기타 휴가 한도 체크 유틸리티 함수 (leaveRecords의 '발생' 데이터를 기준으로 계산)
+    // 💡 휴가 한도 체크 유틸리티 (당해 연도 기준 적용)
     const checkLeaveLimit = (empId, category, reqDays) => {
         if (category === '연차') return { pass: true, remain: null };
         
+        const currentYear = new Date().getFullYear();
+        const yearStart = `${currentYear}-01-01`;
+        
         const allowed = leaveRecords
-            .filter(r => r.empId === empId && r.leaveCategory === category && r.type === '발생' && !r.isCanceled)
+            .filter(r => r.empId === empId && r.leaveCategory === category && r.type === '발생' && !r.isCanceled && r.date >= yearStart)
             .reduce((acc, r) => acc + r.days, 0);
             
         const used = leaveRecords
-            .filter(r => r.empId === empId && r.leaveCategory === category && r.type === '사용' && !r.isCanceled)
+            .filter(r => r.empId === empId && r.leaveCategory === category && r.type === '사용' && !r.isCanceled && r.date >= yearStart)
             .reduce((acc, r) => acc + r.days, 0);
             
         const remain = allowed - used;
@@ -225,58 +219,73 @@ export default function AnnualLeaveApp() {
         return () => clearTimeout(timerId);
     }, [isReady, leaveRecords]);
 
-    // 연차 자동 발생 로직 (오직 '연차' 카테고리만 자동 생성 및 중복 생성 방지)
-    const processedEmps = useRef(new Set());
-
+    // 💡 삭제된 과거 연차의 무한 재생성 차단 로직 적용
     useEffect(() => {
         const syncAutoLeave = async () => {
             if (!isReady || employees.length === 0) return;
             const today = new Date();
+            
             for (const emp of employees) {
                 if (!emp.joinDate) continue;
                 
-                const empHash = `${emp.empId}-${emp.joinDate}`;
-                if (processedEmps.current.has(empHash)) continue;
-
+                // 직원이 마지막으로 연차를 부여받은 날짜(진도)를 확인합니다.
+                let maxGenerated = emp.autoLeaveGeneratedUpTo || '1900-01-01';
+                let updatedMax = maxGenerated;
+                let hasNew = false;
+                
                 const joinDateStr = emp.joinDate;
                 
+                // 1년 미만 만근 연차 (1~11개월)
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
-                    if (today >= new Date(targetDateStr)) {
+                    // 이미 과거에 진도가 지나간 날짜는 무시합니다. (삭제했더라도 재생성 안 함)
+                    if (targetDateStr > maxGenerated && today >= new Date(targetDateStr)) {
                         const uniqueId = `auto-${emp.empId}-${targetDateStr}`;
                         try { 
                             const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
-                            // 💡 이미 연차가 생성되었는지 확인 (덮어쓰기 완전 방지)
                             const snap = await getDoc(docRef);
                             if (!snap.exists()) {
                                 await setDoc(docRef, { date: targetDateStr, type: '발생', leaveCategory: '연차', days: 1, remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false }); 
                             }
                         } catch (e) {}
+                        if (targetDateStr > updatedMax) updatedMax = targetDateStr;
+                        hasNew = true;
                     }
                 }
+                
+                // 1년 이상 연차 (1년차, 2년차...)
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
+                
                 if (years >= 1) {
                     for (let y = 1; y <= Math.floor(years); y++) {
                         const targetDateStr = addYearsExact(joinDateStr, y);
-                        if (today >= new Date(targetDateStr)) {
+                        // 이미 과거에 진도가 지나간 날짜는 무시합니다.
+                        if (targetDateStr > maxGenerated && today >= new Date(targetDateStr)) {
                             let base = 15;
                             if (y >= 3) base += Math.floor((y - 1) / 2);
                             base = Math.min(base, 25);
                             const uniqueId = `auto-${emp.empId}-${targetDateStr}`;
                             try { 
                                 const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
-                                // 💡 이미 연차가 생성되었는지 확인 (덮어쓰기 완전 방지)
                                 const snap = await getDoc(docRef);
                                 if (!snap.exists()) {
                                     await setDoc(docRef, { date: targetDateStr, type: '발생', leaveCategory: '연차', days: base, remark: `입사 ${y}년차 연차 (시스템 자동 발생)`, isAuto: true, isFulfilled: true, empId: emp.empId, dept: emp.dept, name: emp.name, realName: emp.realName, isCanceled: false }); 
                                 }
                             } catch (e) {}
+                            if (targetDateStr > updatedMax) updatedMax = targetDateStr;
+                            hasNew = true;
                         }
                     }
                 }
-                processedEmps.current.add(empHash);
+                
+                // 새롭게 발생한 연차가 있다면 직원의 진도(날짜)를 업데이트합니다.
+                if (hasNew && updatedMax > maxGenerated) {
+                    try {
+                        await updateDoc(doc(db, publicPath, 'employees', emp.empId), { autoLeaveGeneratedUpTo: updatedMax });
+                    } catch(e) {}
+                }
             }
         };
         syncAutoLeave();
@@ -304,9 +313,6 @@ export default function AnnualLeaveApp() {
     );
 }
 
-// --------------------------------------------------------
-// 폼 컴포넌트 (비제어 컴포넌트 useRef 완벽 적용)
-// --------------------------------------------------------
 function LoginView() {
     const { setUser, departments, employees, adminPassword, showToast } = useContext(AppContext);
     const [mode, setMode] = useState('user');
@@ -485,10 +491,9 @@ const AdminEmployeeForm = ({ departments, leaveTypes, editingEmp, onSave, onCanc
                 <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={gender === '남성'} onChange={() => setGender('남성')} /> 남성</label><label><input type="radio" checked={gender === '여성'} onChange={() => setGender('여성')} /> 여성</label></div></div>
                 <div><label className="block font-bold mb-1">입사일 (기준일)</label><input required type="date" value={joinDate} onChange={e => setJoinDate(e.target.value)} className="w-full border p-2 rounded" /></div>
                 
-                {/* 커스텀 휴가 일수 부여 영역 */}
                 {leaveTypes.length > 0 && (
                     <div className="border-t pt-4 mt-4 border-slate-200">
-                        <label className="block font-bold mb-2 text-indigo-700">기타 휴가 일수 부여 (선택)</label>
+                        <label className="block font-bold mb-2 text-indigo-700">기타 휴가 부여 (당해 연도)</label>
                         <div className="space-y-2">
                             {leaveTypes.map(type => (
                                 <div key={type} className="flex items-center justify-between gap-2 bg-white p-2 border rounded">
@@ -600,10 +605,6 @@ const AdminSettingsForm = () => {
     );
 };
 
-// --------------------------------------------------------
-// 인쇄 모달 컴포넌트들 (A4 꽉 차게 1장 출력 설계)
-// --------------------------------------------------------
-
 const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
     if (!record) return null;
     const decryptedName = decryptName(record.realName || user.realName);
@@ -657,9 +658,11 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
     );
 };
 
-const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
+const PrintSummaryModal = ({ employee, records, aGen, aUsed, otherStats, onClose }) => {
     if (!employee) return null;
     const decryptedEmpName = decryptName(employee.realName);
+    const currentYear = new Date().getFullYear();
+    
     return (
         <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4 print:static print:bg-transparent print:p-0 print:z-auto">
             <div className="bg-white rounded-lg shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh] print:max-w-none print:w-full print:shadow-none print:max-h-none print:h-auto print:rounded-none print:border-none print:block">
@@ -676,11 +679,29 @@ const PrintSummaryModal = ({ employee, records, gen, used, onClose }) => {
                         <div className="text-sm">출력일자: {new Date().toLocaleDateString()}</div>
                         <div className="font-bold text-lg bg-slate-100 px-4 py-2 border rounded">{employee.dept} / {decryptedEmpName}</div>
                     </div>
-                    <div className="flex gap-4 mb-6">
-                        <div className="flex-1 bg-blue-50 text-blue-800 p-4 rounded text-center border border-blue-200"><div className="text-sm">연차 총 발생</div><div className="text-2xl font-bold">{gen}일</div></div>
-                        <div className="flex-1 bg-orange-50 text-orange-800 p-4 rounded text-center border border-orange-200"><div className="text-sm">연차 총 사용</div><div className="text-2xl font-bold">{used}일</div></div>
-                        <div className="flex-1 bg-indigo-50 text-indigo-800 p-4 rounded text-center border border-indigo-200"><div className="text-sm">잔여 연차</div><div className="text-2xl font-black">{gen - used}일</div></div>
+                    
+                    <h3 className="font-bold text-slate-700 mb-2">연차 내역 (총 누적)</h3>
+                    <div className="flex gap-4 mb-4">
+                        <div className="flex-1 bg-blue-50 text-blue-800 p-4 rounded text-center border border-blue-200"><div className="text-sm">연차 총 발생</div><div className="text-2xl font-bold">{aGen}일</div></div>
+                        <div className="flex-1 bg-orange-50 text-orange-800 p-4 rounded text-center border border-orange-200"><div className="text-sm">연차 총 사용</div><div className="text-2xl font-bold">{aUsed}일</div></div>
+                        <div className="flex-1 bg-indigo-50 text-indigo-800 p-4 rounded text-center border border-indigo-200"><div className="text-sm">잔여 연차</div><div className="text-2xl font-black">{aGen - aUsed}일</div></div>
                     </div>
+
+                    {otherStats && Object.keys(otherStats).length > 0 && (
+                        <div className="mb-6">
+                            <h3 className="font-bold text-slate-700 mb-2">기타 휴가 ({currentYear}년 기준)</h3>
+                            <div className="flex flex-wrap gap-2">
+                                {Object.entries(otherStats).map(([type, st]) => (
+                                    <div key={type} className="flex-1 min-w-[150px] bg-slate-50 border p-3 rounded text-center">
+                                        <div className="font-bold text-slate-700 mb-1">{type}</div>
+                                        <div className="text-sm text-slate-500">발생: {st.gen} / 사용: {st.used}</div>
+                                        <div className="text-lg font-bold text-indigo-600">잔여: {st.remain}일</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <table className="w-full text-sm text-center border-collapse border border-slate-300">
                         <thead className="bg-slate-100">
                             <tr><th className="border p-2">일자</th><th className="border p-2">종류</th><th className="border p-2">구분</th><th className="border p-2">일수</th><th className="border p-2 text-left">적요(사유/이력)</th></tr>
@@ -719,7 +740,6 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     if (!allEmployees) return null;
 
     const calculateStatus = (emp) => {
-        // 연차만 집계
         const myRecords = records.filter(r => r.empId === emp.empId && (r.leaveCategory === '연차' || !r.leaveCategory));
         const gen = myRecords.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)).reduce((acc, r) => acc + r.days, 0);
         const used = myRecords.filter(r => r.type === '사용' && !r.isCanceled).reduce((acc, r) => acc + r.days, 0);
@@ -791,25 +811,25 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                 </div>
                                 <div className="flex-1 p-6 md:p-12 overflow-auto print:p-0 print:overflow-visible print:block">
                                     {docType === '촉구서' ? (
-                                        <div className="space-y-4 print:space-y-6 text-base flex flex-col h-full print:h-auto print:block text-slate-900 print:text-base">
+                                        <div className="text-base flex flex-col h-full print:h-auto print:block text-slate-900 print:text-base">
                                             <h1 className="text-2xl print:text-3xl font-black text-center mb-6 print:mb-10 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-4 print:mb-8 text-base">
+                                            <table className="w-full border-collapse border border-black text-center mb-4 print:mb-12 text-base">
                                                 <tbody>
                                                     <tr><th className="border border-black bg-slate-100 p-2 print:p-3 w-1/4">부서</th><td className="border border-black p-2 print:p-3">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 print:p-3 w-1/4">성명</th><td className="border border-black p-2 print:p-3 font-bold">{decryptedSelectedName}</td></tr>
                                                     <tr><th className="border border-black bg-slate-100 p-2 print:p-3">총 발생일수</th><td className="border border-black p-2 print:p-3">{calculateStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-2 print:p-3">사용일수</th><td className="border border-black p-2 print:p-3">{calculateStatus(selectedEmp).used}일</td></tr>
                                                     <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 print:p-3 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 print:p-3 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
-                                            <p className="leading-relaxed text-left mt-2 print:mt-4">
+                                            <p className="leading-relaxed text-left mb-4 print:mb-8">
                                                 귀하는 「근로기준법 제61조」에 의거하여, 귀하의 미사용 연차 유급휴가 일수를 위와 같이 통지하오니, 
                                                 본 통지서를 수령한 날로부터 <strong>10일 이내</strong>에 미사용 연차 유급휴가의 사용 시기를 정하여 회사에 서면으로 통보하여 주시기 바랍니다.
                                             </p>
-                                            <p className="leading-relaxed text-left mt-1 print:mt-4">
+                                            <p className="leading-relaxed text-left mb-6 print:mb-12">
                                                 만약, 10일 이내에 사용 시기를 통보하지 않을 경우 회사가 귀하의 휴가 사용 시기를 임의로 지정하여 통보할 수 있으며, 
                                                 그럼에도 불구하고 휴가를 사용하지 않아 소멸된 연차 휴가에 대해서는 <strong>금전적 보상의무가 면제됨</strong>을 알려드립니다.
                                             </p>
-                                            <div className="text-center mt-6 print:mt-12 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-4 text-xl font-black mb-6 print:mb-0">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center font-bold text-lg mb-6 print:mb-12">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right text-xl font-black mb-8 print:mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
                                             
                                             <div className="border-2 border-dashed border-black p-4 md:p-6 mt-auto bg-white w-full text-left print:break-inside-avoid print:mt-24">
                                                 <h3 className="font-bold text-center text-lg mb-4 print:mb-6">[ 본 인 수 령 증 ]</h3>
@@ -831,24 +851,24 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="space-y-4 print:space-y-6 text-base flex flex-col h-full print:h-auto print:block text-slate-900 print:text-base">
-                                            <h1 className="text-2xl print:text-3xl font-black text-center mb-6 print:mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
-                                            <table className="w-full border-collapse border border-black text-center mb-4 print:mb-8 text-base">
+                                        <div className="text-base flex flex-col h-full print:h-auto print:block text-slate-900 print:text-base">
+                                            <h1 className="text-2xl print:text-3xl font-black text-center mb-6 print:mb-10 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
+                                            <table className="w-full border-collapse border border-black text-center mb-4 print:mb-12 text-base">
                                                 <tbody>
                                                     <tr><th className="border border-black bg-slate-100 p-2 print:p-3 w-1/4">부서</th><td className="border border-black p-2 print:p-3">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 print:p-3 w-1/4">성명</th><td className="border border-black p-2 print:p-3 font-bold">{decryptedSelectedName}</td></tr>
                                                     <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 print:p-3 font-bold">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 print:p-3 font-bold text-red-600">{calculateStatus(selectedEmp).remain}일</td></tr>
                                                 </tbody>
                                             </table>
-                                            <p className="leading-relaxed text-left mt-2 print:mt-4">
+                                            <p className="leading-relaxed text-left mb-4 print:mb-8">
                                                 귀하는 「근로기준법 제61조」에 의거한 미사용 연차 유급휴가 사용 촉구에도 불구하고, 촉구를 받은 날로부터 10일 이내에 사용 시기를 회사에 통보하지 아니하였습니다.
                                             </p>
-                                            <p className="leading-relaxed text-left mt-1 print:mt-4">
+                                            <p className="leading-relaxed text-left mb-4 print:mb-8">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
                                             </p>
                                             
-                                            <div className="border border-black p-4 md:p-5 mt-4 print:mt-8 bg-slate-50 w-full text-left print:bg-white print:border-2">
+                                            <div className="border border-black p-4 md:p-5 mb-6 print:mb-12 bg-slate-50 w-full text-left print:bg-white print:border-2">
                                                 <h3 className="font-bold text-center text-base md:text-lg mb-4 print:mb-6">[ 연차 유급휴가 사용 지정 내역 ]</h3>
-                                                <div className="flex flex-col gap-4 print:gap-6 text-sm md:text-base px-2 md:px-4 py-2">
+                                                <div className="flex flex-col gap-4 print:gap-8 text-sm md:text-base px-2 md:px-4 py-2">
                                                     {[1, 2, 3].map((num) => (
                                                         <div key={num} className="flex items-end justify-between w-full">
                                                             <span className="whitespace-nowrap font-bold mr-2 md:mr-4">{num}차 지정 :</span>
@@ -862,8 +882,8 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                                 </div>
                                             </div>
 
-                                            <div className="text-center mt-6 print:mt-12 font-bold text-lg">{new Date().toLocaleDateString()}</div>
-                                            <div className="text-right mt-4 text-xl font-black mb-6 print:mb-0">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
+                                            <div className="text-center font-bold text-lg mb-6 print:mb-12">{new Date().toLocaleDateString()}</div>
+                                            <div className="text-right text-xl font-black mb-8 print:mb-12">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 
                                             <div className="border-2 border-dashed border-black p-4 md:p-6 mt-auto bg-white w-full text-left print:break-inside-avoid print:mt-24">
                                                 <h3 className="font-bold text-center text-lg mb-4 print:mb-6">[ 본 인 수 령 증 ]</h3>
@@ -909,10 +929,6 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     );
 };
 
-// --------------------------------------------------------
-// 관리자 / 사용자 메인 뷰
-// --------------------------------------------------------
-
 function AdminView() {
     const { setUser, departments, leaveTypes, employees, leaveRecords, approvalLine, companyName, showToast, showConfirm, dbUpdateSettings, checkLeaveLimit, publicPath } = useContext(AppContext);
     const [tab, setTab] = useState('직원 관리');
@@ -930,7 +946,6 @@ function AdminView() {
         const encryptedRealName = encryptName(form.name);
         const maskedName = maskName(form.name);
         try {
-            // 1. 직원 프로필(기본 정보 및 customAllowances) 저장
             if (editingEmp) {
                 await setDoc(doc(db, publicPath, 'employees', editingEmp.empId), { ...form, name: maskedName, realName: encryptedRealName }, { merge: true });
             } else {
@@ -938,40 +953,27 @@ function AdminView() {
                 await setDoc(doc(db, publicPath, 'employees', form.empId), { ...form, name: maskedName, realName: encryptedRealName });
             }
             
-            // 💡 2. 기타 휴가 일수를 leaveRecords에 '발생' 데이터로 저장 (내역 표에 표시되도록)
+            // 기타 휴가 일수를 올해 기준으로 발생시킵니다.
+            const currentYear = new Date().getFullYear();
             for (const type of leaveTypes) {
                 const days = parseFloat(form.customAllowances[type]) || 0;
-                // 해당 휴가에 대한 영구적인 하나의 ID를 생성하여 덮어쓰기 업데이트
-                const docId = `manual-gen-${form.empId}-${type}`;
+                const docId = `manual-gen-${form.empId}-${type}-${currentYear}`;
                 const docRef = doc(db, publicPath, 'leaveRecords', docId);
                 
                 if (days > 0) {
                     try {
                         const snap = await getDoc(docRef);
                         if (snap.exists()) {
-                            // 이미 발생 기록이 있다면 일수(days)만 최신화 (최초 발생 일자는 유지)
-                            if (snap.data().days !== days) {
-                                await updateDoc(docRef, { days: days });
-                            }
+                            if (snap.data().days !== days) await updateDoc(docRef, { days: days });
                         } else {
-                            // 기록이 없다면 새로 '발생' 기록 생성
                             await setDoc(docRef, {
-                                empId: form.empId,
-                                dept: form.dept,
-                                name: maskedName,
-                                realName: encryptedRealName,
-                                date: new Date().toISOString().split('T')[0], // 생성한 오늘 날짜
-                                type: '발생',
-                                leaveCategory: type,
-                                days: days,
-                                remark: `${type} 일수 부여 (관리자 설정)`,
-                                isCanceled: false,
-                                isAuto: false
+                                empId: form.empId, dept: form.dept, name: maskedName, realName: encryptedRealName,
+                                date: new Date().toISOString().split('T')[0], type: '발생', leaveCategory: type,
+                                days: days, remark: `${currentYear}년 ${type} 부여 (관리자)`, isCanceled: false, isAuto: false
                             });
                         }
                     } catch (e) {}
                 } else {
-                    // 일수를 0으로 만들면 해당 발생 기록 삭제
                     try { await deleteDoc(docRef); } catch(e) {}
                 }
             }
@@ -996,7 +998,6 @@ function AdminView() {
         if (!form.empId || !form.date) return showToast('직원과 날짜를 선택하세요.', 'error');
         const emp = employees.find(e => e.empId === form.empId);
         
-        // 휴가 한도 체크
         const limitCheck = checkLeaveLimit(emp.empId, form.category, form.days);
         if (!limitCheck.pass) {
             return showToast(`휴가 한도 초과 (잔여: ${limitCheck.remain}일)`, 'error');
@@ -1015,7 +1016,7 @@ function AdminView() {
 
     const handleBulkDelete = () => {
         if (!delDate.start || !delDate.end) return showToast('삭제할 기간을 선택하세요.', 'error');
-        showConfirm(`정말 일괄 영구삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다. (사용 데이터 제외)`, async () => {
+        showConfirm(`정말 일괄 영구삭제하시겠습니까?\n\n${delDate.start} ~ ${delDate.end} 기간 내의 '발생' 데이터만 영구 삭제됩니다.`, async () => {
             try {
                 const targets = leaveRecords.filter(r => r.date >= delDate.start && r.date <= delDate.end && r.type === '발생');
                 for(let r of targets) await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
@@ -1031,16 +1032,30 @@ function AdminView() {
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const getSummary = (empId) => {
-        const myR = leaveRecords.filter(r => r.empId === empId && (r.leaveCategory === '연차' || !r.leaveCategory));
-        const gen = myR.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)).reduce((a, b) => a + b.days, 0);
-        const used = myR.filter(r => r.type === '사용' && !r.isCanceled).reduce((a, b) => a + b.days, 0);
-        return { gen, used };
+        const currentYear = new Date().getFullYear();
+        const yearStart = `${currentYear}-01-01`;
+        const myR = leaveRecords.filter(r => r.empId === empId);
+        
+        const aGen = myR.filter(r => (r.leaveCategory === '연차' || !r.leaveCategory) && r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)).reduce((a, b) => a + b.days, 0);
+        const aUsed = myR.filter(r => (r.leaveCategory === '연차' || !r.leaveCategory) && r.type === '사용' && !r.isCanceled).reduce((a, b) => a + b.days, 0);
+        
+        const otherStats = {};
+        leaveTypes.forEach(type => {
+            const tr = myR.filter(r => r.leaveCategory === type && r.date >= yearStart);
+            const tGen = tr.filter(r => r.type === '발생' && !r.isCanceled).reduce((a, b) => a + b.days, 0);
+            const tUsed = tr.filter(r => r.type === '사용' && !r.isCanceled).reduce((a, b) => a + b.days, 0);
+            if (tGen > 0 || tUsed > 0) {
+                otherStats[type] = { gen: tGen, used: tUsed, remain: tGen - tUsed };
+            }
+        });
+        
+        return { aGen, aUsed, otherStats };
     };
 
     return (
         <div className="max-w-[1200px] mx-auto p-2 md:p-4 min-h-screen flex flex-col print:p-0 print:min-h-0 print:block">
             <PrintApplicationModal record={printModal} user={{}} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
-            <PrintSummaryModal employee={summaryModal?.emp} records={summaryModal?.records} gen={summaryModal?.gen} used={summaryModal?.used} onClose={() => setSummaryModal(null)} />
+            <PrintSummaryModal employee={summaryModal?.emp} records={summaryModal?.records} aGen={summaryModal?.aGen} aUsed={summaryModal?.aUsed} otherStats={summaryModal?.otherStats} onClose={() => setSummaryModal(null)} />
             {promoModalOpen && <PrintPromotionModal allEmployees={employees} records={leaveRecords} onClose={()=>setPromoModalOpen(false)} />}
             
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0 mb-4 print:hidden">
@@ -1101,7 +1116,10 @@ function AdminView() {
                                 <button onClick={() => {
                                     if(filterName) {
                                         const e = employees.find(x=>decryptName(x.realName)===filterName && (!filterDept||x.dept===filterDept));
-                                        if(e) { const s = getSummary(e.empId); setSummaryModal({emp:e, records:leaveRecords.filter(r=>r.empId===e.empId).sort((a,b)=>new Date(b.date)-new Date(a.date)), gen:s.gen, used:s.used}); }
+                                        if(e) { 
+                                            const s = getSummary(e.empId); 
+                                            setSummaryModal({emp:e, records:leaveRecords.filter(r=>r.empId===e.empId).sort((a,b)=>new Date(b.date)-new Date(a.date)), aGen:s.aGen, aUsed:s.aUsed, otherStats:s.otherStats}); 
+                                        }
                                     } else { showToast('개인 집계표를 보려면 특정 직원을 선택하세요.', 'error'); }
                                 }} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded shadow-sm border border-indigo-200 font-bold hover:bg-indigo-200 shrink-0">개인집계표</button>
                                 <button onClick={()=>setPromoModalOpen(true)} className="bg-orange-500 text-white px-3 py-1.5 rounded shadow flex items-center gap-1 font-bold hover:bg-orange-600 shrink-0"><Icons.AlertCircle/> 연차 통지/촉구서 출력</button>
@@ -1138,7 +1156,7 @@ function AdminView() {
                                                     
                                                     {r.type === '발생' ? (
                                                         <button onClick={()=>{
-                                                            showConfirm('이 발생 기록을 완전히 영구 삭제하시겠습니까?', async () => {
+                                                            showConfirm('이 발생 기록을 완전히 영구 삭제하시겠습니까?\n(과거 연차는 재생성되지 않습니다)', async () => {
                                                                 try {
                                                                     await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
                                                                     showToast('영구 삭제되었습니다.');
@@ -1180,16 +1198,18 @@ function UserView() {
 
     const userRecords = leaveRecords.filter(r => r.empId === user.empId).sort((a, b) => new Date(b.date) - new Date(a.date));
     
-    // 연차 계산
+    // 연차 계산 (전체 기간 기준)
     const annualRecords = userRecords.filter(r => r.leaveCategory === '연차' || !r.leaveCategory);
     const gen = annualRecords.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)).reduce((a, b) => a + b.days, 0);
     const used = annualRecords.filter(r => r.type === '사용' && !r.isCanceled).reduce((a, b) => a + b.days, 0);
     const remain = gen - used;
+    
+    const currentYear = new Date().getFullYear();
+    const yearStart = `${currentYear}-01-01`;
 
     const handleApply = async (form) => {
         if (!form.applyDate) return;
 
-        // 휴가 한도 체크
         const limitCheck = checkLeaveLimit(user.empId, form.applyCategory, form.applyDays);
         if (!limitCheck.pass) {
             return showToast(`휴가 한도 초과 (잔여: ${limitCheck.remain}일)`, 'error');
@@ -1212,10 +1232,8 @@ function UserView() {
 
     return (
         <div className="max-w-[1000px] mx-auto p-2 md:p-4 min-h-screen flex flex-col print:p-0 print:min-h-0 print:block">
-            {/* 인쇄창 모달 */}
             <PrintApplicationModal record={printModal} user={user} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
             
-            {/* 앱 배경 UI 요소에 print:hidden 적용 */}
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow shrink-0 mb-4 print:hidden">
                 <div className="flex items-center gap-2 font-black text-indigo-700 text-lg"><Icons.Calendar /> 휴가 관리 시스템</div>
                 <div className="flex items-center justify-between w-full md:w-auto gap-4 text-sm mt-2 md:mt-0">
@@ -1226,23 +1244,24 @@ function UserView() {
             
             <main className="flex-1 flex flex-col lg:flex-row gap-4 md:gap-6 print:hidden">
                 <div className="w-full lg:w-1/3 flex flex-col gap-4 md:gap-6">
-                    {/* 연차 요약 */}
                     <div className="flex gap-2 bg-white p-4 rounded-xl shadow border">
                         <div className="flex-1 text-center bg-blue-50 py-3 rounded-lg"><div className="text-[10px] text-slate-500 mb-1 font-bold">연차 총 발생</div><div className="text-lg font-black text-blue-700">{gen}일</div></div>
                         <div className="flex-1 text-center bg-orange-50 py-3 rounded-lg"><div className="text-[10px] text-slate-500 mb-1 font-bold">연차 사용</div><div className="text-lg font-black text-orange-700">{used}일</div></div>
                         <div className="flex-1 text-center bg-indigo-50 py-3 rounded-lg border border-indigo-100 shadow-sm"><div className="text-[10px] text-indigo-500 mb-1 font-bold">잔여 연차</div><div className={`text-xl font-black ${remain<0?'text-red-600':'text-indigo-700'}`}>{remain}일</div></div>
                     </div>
                     
-                    {/* 기타 커스텀 휴가 요약 (DB 발생 내역 기준) */}
                     {leaveTypes.length > 0 && (
                         <div className="bg-white p-4 rounded-xl shadow border">
-                            <h3 className="font-bold text-sm text-slate-600 mb-3 border-b pb-2">기타 휴가 잔여일</h3>
+                            <h3 className="font-bold text-sm text-slate-600 mb-3 border-b pb-2">기타 휴가 잔여일 ({currentYear}년 기준)</h3>
                             <div className="space-y-2">
                                 {leaveTypes.map(type => {
-                                    // 💡 UI 표시도 발생/사용 내역을 합산해서 정확하게 보여줌
-                                    const allowed = userRecords.filter(r => r.leaveCategory === type && r.type === '발생' && !r.isCanceled).reduce((acc, r) => acc + r.days, 0);
-                                    const cUsed = userRecords.filter(r => r.leaveCategory === type && r.type === '사용' && !r.isCanceled).reduce((acc, r) => acc + r.days, 0);
+                                    const tRecords = userRecords.filter(r => r.leaveCategory === type && r.date >= yearStart);
+                                    const allowed = tRecords.filter(r => r.type === '발생' && !r.isCanceled).reduce((acc, r) => acc + r.days, 0);
+                                    const cUsed = tRecords.filter(r => r.type === '사용' && !r.isCanceled).reduce((acc, r) => acc + r.days, 0);
                                     const cRemain = allowed - cUsed;
+                                    
+                                    if (allowed === 0 && cUsed === 0) return null; // 사용 내역이나 부여된 일수가 없으면 숨김
+                                    
                                     return (
                                         <div key={type} className="flex justify-between items-center text-sm p-2 bg-slate-50 rounded">
                                             <span className="font-bold text-slate-700">{type}</span>

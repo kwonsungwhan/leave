@@ -952,7 +952,7 @@ function AdminView() {
     return (
         <div className="max-w-[1200px] mx-auto p-2 md:p-4 flex flex-col min-h-screen md:h-screen print:h-auto print:block">
             <PrintApplicationModal record={printModal} user={{}} approvalLine={approvalLine} onClose={() => setPrintModal(null)} />
-            <PrintSummaryModal employee={summaryModal?.emp} records={summaryModal?.records} onClose={() => setSummaryModal(null)} />
+            <PrintSummaryModal employee={summaryModal?.emp} records={summaryModal?.records} baseDate={summaryModal?.baseDate} onClose={() => setSummaryModal(null)} />
             {promoModalOpen && <PrintPromotionModal allEmployees={employees} records={leaveRecords} onClose={()=>setPromoModalOpen(false)} />}
             
             <header className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-4 rounded-xl shadow mb-4 gap-2 md:gap-0 print:hidden">

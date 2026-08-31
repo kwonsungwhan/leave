@@ -455,7 +455,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         </tbody>
                     </table>
                     <div className="text-center text-lg mb-16">위와 같이 {typeName}를(을) 신청하오니 허가하여 주시기 바랍니다.</div>
-                    <div className="text-center mb-8 text-lg font-bold">{new Date(record.date).toLocaleDateString()}</div>
+                    <div className="text-center mb-8 text-lg font-bold">{new Date().toLocaleDateString()}</div>
                     <div className="flex justify-end items-end text-lg pr-12 mt-16">
                         <span className="mr-4">신청자 :</span>
                         <div className="w-48 border-b-2 border-black border-dotted h-6 mr-2"></div>

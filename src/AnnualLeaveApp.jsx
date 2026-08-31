@@ -227,6 +227,10 @@ export default function AnnualLeaveApp() {
         const syncAutoLeave = async () => {
             if (!isReady || employees.length === 0) return;
             const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            // 2년 전 오늘 날짜 (이 기준일 이후에 해당하는 연차만 생성/저장)
+            const cutoffForGeneration = new Date(today.getFullYear() - 2, today.getMonth(), today.getDate());
             
             for (const emp of employees) {
                 if (!emp.joinDate) continue;
@@ -235,30 +239,16 @@ export default function AnnualLeaveApp() {
                 // 1. 1년 미만 만근 연차 생성
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
-                    if (today >= new Date(targetDateStr)) {
-                        // 고유 ID: auto-연차-사번-날짜. 이 ID가 존재하면 생성하지 않음.
+                    const targetDate = new Date(targetDateStr);
+                    targetDate.setHours(0, 0, 0, 0);
+                    
+                    // 발생일이 도래했고(<= 오늘), 발생일이 2년 전보다 최신이거나 같은 경우에만 저장
+                    if (targetDate <= today && targetDate >= cutoffForGeneration) {
                         const uniqueId = `auto-연차-${emp.empId}-${targetDateStr}`;
                         const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
                         const docSnap = await getDoc(docRef);
                         
-                        // 문서가 없을 때만 새로 생성! (삭제되었더라도 휴지통 개념으로 처리하지 않고 DB에 없으면 재생성될 위험이 있지만, 
-                        // 일반적으로 1번 생성된 auto-연차는 관리자가 '영구삭제'하면 재생성됨. 
-                        // 이를 방지하려면 취소(줄긋기)만 사용하는 것이 권장됨.)
-                        // 하지만 요구사항대로 "과거에 지웠던게 계속 살아남"을 막기 위해 
-                        // 생성 이력 자체를 추적해야 함. 간단하게는 고유 ID를 조회해서 없으면 생성하는 것이 맞으나,
-                        // 사용자가 '삭제'를 했다면 ID가 사라지므로 다시 생성된다.
-                        // 이를 완벽히 해결하려면 'employee' 문서 안에 '발생완료_연차_ID배열'을 저장해야 한다.
-                        // 하지만 구조 변경을 최소화하기 위해, getDoc 체크를 그대로 둔다. 
-                        // (진짜 "영구삭제"를 하면 재생성되는 것은 설계상 자연스러운 현상이지만 사용자 요청에 따라 막으려 한다면, 
-                        // 차라리 '영구삭제'를 막고 '취소처리(줄긋기)'만 사용하게 유도하는 것이 낫다.
-                        // 현재 로직은 getDoc으로 체크하므로, 삭제하면 재생성된다.)
-                        
                         if (!docSnap.exists()) {
-                            // Check if a deleted record exists (we can't easily do this if it's truly deleted).
-                            // As a workaround, we assume if it's past, and it doesn't exist, we STILL create it.
-                            // If they delete it, it WILL come back on next refresh. 
-                            // To fix the zombie issue without complex schema changes:
-                            // We MUST tell users to use "Cancel (Strike-through)" instead of "Permanent Delete" for generated records.
                             const recordData = { 
                                 date: targetDateStr, type: '발생', typeCategory: '연차', days: 1, 
                                 remark: `입사 ${m}개월 만근 연차 (시스템 자동 발생)`, 
@@ -273,15 +263,24 @@ export default function AnnualLeaveApp() {
                 // 2. 1년 이상 연차 생성
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
-                const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365);
                 
-                if (years >= 1) {
-                    for (let y = 1; y <= Math.floor(years); y++) {
+                // 직원의 최대 근속 년수 (현재 연도 - 입사 연도)
+                const currentYear = today.getFullYear();
+                const joinYear = joinD.getFullYear();
+                const maxYears = currentYear - joinYear + 1; // 연차 계산을 위해 넉넉하게 반복
+                
+                if (maxYears >= 1) {
+                    for (let y = 1; y <= maxYears; y++) {
                         const targetDateStr = addYearsExact(joinDateStr, y);
-                        if (today >= new Date(targetDateStr)) {
+                        const targetDate = new Date(targetDateStr);
+                        targetDate.setHours(0, 0, 0, 0);
+                        
+                        // 발생일이 도래했고(<= 오늘), 2년 전 제한선(cutoff)보다 최신인 경우에만 저장
+                        if (targetDate <= today && targetDate >= cutoffForGeneration) {
                             let base = 15;
                             if (y >= 3) base += Math.floor((y - 1) / 2);
                             base = Math.min(base, 25);
+                            
                             const uniqueId = `auto-연차-${emp.empId}-${targetDateStr}`;
                             const docRef = doc(db, publicPath, 'leaveRecords', uniqueId);
                             const docSnap = await getDoc(docRef);

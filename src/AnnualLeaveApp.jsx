@@ -479,16 +479,17 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
     );
 };
 
-const PrintSummaryModal = ({ employee, records, onClose }) => {
+const PrintSummaryModal = ({ employee, records, baseDate, onClose }) => {
     if (!employee) return null;
     const decryptedEmpName = decryptName(employee.realName);
 
     // 기록을 바탕으로 모든 휴가 종류 통계 집계
     const stats = {};
-    const today = new Date();
-    const thisYear = today.getFullYear();
-    const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+    const targetDate = baseDate ? new Date(baseDate) : new Date();
+    const thisYear = targetDate.getFullYear();
+    const oneYearAgo = new Date(targetDate.getFullYear() - 1, targetDate.getMonth(), targetDate.getDate());
     const oneYearAgoStr = `${oneYearAgo.getFullYear()}-${String(oneYearAgo.getMonth() + 1).padStart(2, '0')}-${String(oneYearAgo.getDate()).padStart(2, '0')}`;
+    const targetDateStr = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
 
     if (records && records.length > 0) {
         records.forEach(r => {
@@ -498,6 +499,9 @@ const PrintSummaryModal = ({ employee, records, onClose }) => {
             const recYear = r.date ? parseInt(r.date.substring(0, 4), 10) : thisYear;
 
             if (!r.isCanceled && (!r.isAuto || r.isFulfilled)) {
+                // 기준일(targetDateStr) 이후의 미래 데이터는 집계에서 제외
+                if (r.date > targetDateStr) return;
+
                 // 연차는 딱 1년 전 데이터까지만, 기타 휴가는 당해 연도만 집계
                 if (typeName === '연차') {
                     if (r.date >= oneYearAgoStr) {
@@ -546,26 +550,29 @@ const PrintSummaryModal = ({ employee, records, onClose }) => {
                     </div>
                 </div>
                 <div className="p-8 overflow-auto bg-white" id="print-area">
-                    <h1 className="text-3xl font-black text-center mb-6">개인별 휴가 집계표</h1>
-                    <div className="flex justify-between items-end mb-4">
-                        <div className="text-sm">출력일자: {new Date().toLocaleDateString()}</div>
-                        <div className="font-bold text-lg bg-slate-100 px-4 py-2 border rounded">{employee.dept} / {decryptedEmpName}</div>
+                <h1 className="text-3xl font-black text-center mb-6">개인별 휴가 집계표</h1>
+                <div className="flex justify-between items-end mb-4">
+                    <div className="text-sm">
+                        기준일자: {targetDate.toLocaleDateString()}<br/>
+                        출력일자: {new Date().toLocaleDateString()}
                     </div>
-                    
-                    {/* 통계 요약 구역: 박스 형태에서 한 줄 텍스트 형태로 통일 */}
-                    <div className="mb-6 border-2 border-slate-300 p-5 rounded-lg bg-slate-50 space-y-3">
-                        {renderStats()}
-                    </div>
+                    <div className="font-bold text-lg bg-slate-100 px-4 py-2 border rounded">{employee.dept} / {decryptedEmpName}</div>
+                </div>
+                
+                {/* 통계 요약 구역: 박스 형태에서 한 줄 텍스트 형태로 통일 */}
+                <div className="mb-6 border-2 border-slate-300 p-5 rounded-lg bg-slate-50 space-y-3">
+                    {renderStats()}
+                </div>
 
-                    <table className="w-full text-sm text-center border-collapse border border-slate-300">
-                        <thead className="bg-slate-100">
-                            <tr><th className="border p-2">일자</th><th className="border p-2">휴가 종류</th><th className="border p-2">구분</th><th className="border p-2">일수</th><th className="border p-2 text-left">적요(사유/이력)</th></tr>
-                        </thead>
-                        <tbody className="divide-y">
-                            {records.map((r, i) => {
-                                const typeName = r.typeCategory || r.kind || r.category || r.leaveType || '연차';
-                                return (
-                                    <tr key={`summary-${r.id}-${i}`}>
+                <table className="w-full text-sm text-center border-collapse border border-slate-300">
+                    <thead className="bg-slate-100">
+                        <tr><th className="border p-2">일자</th><th className="border p-2">휴가 종류</th><th className="border p-2">구분</th><th className="border p-2">일수</th><th className="border p-2 text-left">적요(사유/이력)</th></tr>
+                    </thead>
+                    <tbody className="divide-y">
+                        {records.filter(r => r.date <= targetDateStr).map((r, i) => {
+                            const typeName = r.typeCategory || r.kind || r.category || r.leaveType || '연차';
+                            return (
+                                <tr key={`summary-${r.id}-${i}`}>
                                         <td className={`border p-2 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':''}`}>{r.date}</td>
                                         <td className={`border p-2 ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-slate-400':''}`}>{typeName}</td>
                                         <td className="border p-2">{r.type}</td>
@@ -801,6 +808,12 @@ function AdminView() {
     const [filterDept, setFilterDept] = useState('');
     const [filterName, setFilterName] = useState('');
     
+    // 기준일 상태값 추가 (기본값: 오늘)
+    const [summaryBaseDate, setSummaryBaseDate] = useState(() => {
+        const today = new Date();
+        return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    });
+    
     const proxyEmpIdRef = useRef(null);
     const proxyTypeRef = useRef(null);
     const proxyDateRef = useRef(null);
@@ -1020,28 +1033,32 @@ function AdminView() {
                 {tab === '휴가 내역(전체)' && (
                     <div className="flex flex-col h-full gap-4 print:block print:h-auto">
                         <div className="bg-slate-50 p-4 border rounded flex flex-col gap-4 print:hidden">
-                            <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
-                                <span className="font-bold text-slate-600 shrink-0">1. 필터</span>
-                                <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={filterDept} onChange={e => {setFilterDept(e.target.value); setFilterName('');}}>
-                                    <option value="">전체 부서</option>{departments.map(d=><option key={d} value={d}>{d}</option>)}
-                                </select>
-                                <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={filterName} onChange={e => setFilterName(e.target.value)}>
-                                    <option value="">전체 직원</option>
-                                    {employees.filter(e=>filterDept?e.dept===filterDept:true).map((e,i)=><option key={`filter-${e.empId}-${i}`} value={decryptName(e.realName)}>{decryptName(e.realName)}</option>)}
-                                </select>
-                                <button onClick={() => {
-                                    if(filterName) {
-                                        const e = employees.find(x=>decryptName(x.realName)===filterName && (!filterDept||x.dept===filterDept));
-                                        if(e) { setSummaryModal({emp:e, records:leaveRecords.filter(r=>r.empId===e.empId).sort((a,b)=>new Date(b.date)-new Date(a.date))}); }
-                                    } else { showToast('개인 집계표를 보려면 특정 직원을 선택하세요.', 'error'); }
-                                }} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded shadow-sm border border-indigo-200 font-bold hover:bg-indigo-200 shrink-0">개인집계표</button>
-                                <button onClick={()=>setPromoModalOpen(true)} className="bg-orange-500 text-white px-3 py-1.5 rounded shadow flex items-center gap-1 font-bold hover:bg-orange-600 shrink-0"><Icons.AlertCircle/> 촉구/통지서 출력</button>
-                                <button onClick={() => exportCSV(filteredRecords, '휴가내역')} className="bg-green-600 text-white px-3 py-1.5 rounded shadow flex items-center gap-1 font-bold hover:bg-green-700 shrink-0"><Icons.Download /> 엑셀 다운로드</button>
+                        <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
+                            <span className="font-bold text-slate-600 shrink-0">1. 필터</span>
+                            <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={filterDept} onChange={e => {setFilterDept(e.target.value); setFilterName('');}}>
+                                <option value="">전체 부서</option>{departments.map(d=><option key={d} value={d}>{d}</option>)}
+                            </select>
+                            <select className="border p-1.5 rounded w-28 md:w-32 bg-white" value={filterName} onChange={e => setFilterName(e.target.value)}>
+                                <option value="">전체 직원</option>
+                                {employees.filter(e=>filterDept?e.dept===filterDept:true).map((e,i)=><option key={`filter-${e.empId}-${i}`} value={decryptName(e.realName)}>{decryptName(e.realName)}</option>)}
+                            </select>
+                            <div className="flex items-center gap-1 bg-white border rounded px-2 h-[34px] shrink-0">
+                                <span className="text-xs text-slate-500 font-bold">기준일:</span>
+                                <input type="date" className="outline-none text-sm bg-transparent cursor-pointer" value={summaryBaseDate} onChange={e => setSummaryBaseDate(e.target.value)} />
                             </div>
-                            
-                            <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
-                                <span className="font-bold text-slate-600 shrink-0">2. 신청</span>
-                                <select ref={proxyTypeRef} className="border p-1.5 rounded w-24 bg-white">{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select>
+                            <button onClick={() => {
+                                if(filterName) {
+                                    const e = employees.find(x=>decryptName(x.realName)===filterName && (!filterDept||x.dept===filterDept));
+                                    if(e) { setSummaryModal({emp:e, records:leaveRecords.filter(r=>r.empId===e.empId).sort((a,b)=>new Date(b.date)-new Date(a.date)), baseDate: summaryBaseDate}); }
+                                } else { showToast('개인 집계표를 보려면 특정 직원을 선택하세요.', 'error'); }
+                            }} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded shadow-sm border border-indigo-200 font-bold hover:bg-indigo-200 shrink-0">개인집계표</button>
+                            <button onClick={()=>setPromoModalOpen(true)} className="bg-orange-500 text-white px-3 py-1.5 rounded shadow flex items-center gap-1 font-bold hover:bg-orange-600 shrink-0"><Icons.AlertCircle/> 촉구/통지서 출력</button>
+                            <button onClick={() => exportCSV(filteredRecords, '휴가내역')} className="bg-green-600 text-white px-3 py-1.5 rounded shadow flex items-center gap-1 font-bold hover:bg-green-700 shrink-0"><Icons.Download /> 엑셀 다운로드</button>
+                        </div>
+
+                        <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
+                            <span className="font-bold text-slate-600 shrink-0">2. 신청</span>
+                            <select ref={proxyTypeRef} className="border p-1.5 rounded w-24 bg-white">{leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}</select>
                                 <select ref={proxyEmpIdRef} className="border p-1.5 rounded w-28 md:w-32 bg-white"><option value="">직원 선택</option>{employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}</select>
                                 <input ref={proxyDateRef} type="date" className="border p-1.5 rounded bg-white"/>
                                 <select ref={proxyDaysRef} className="border p-1.5 rounded w-20 bg-white">{[0.5,1,2,3,4,5,6,7,8,9,10].map(d=><option key={d} value={d}>{d}일</option>)}</select>

@@ -42,6 +42,7 @@ const addYearsExact = (dateStr, years) => {
     return `${y + years}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 };
 
+// 타임존 시차를 고려하여 정확한 한국 표준시 기준의 YYYY-MM-DD 문자열을 반환하는 함수
 const getTodayStr = () => {
     const d = new Date();
     const tzl = d.getTimezoneOffset() * 60000;
@@ -104,12 +105,13 @@ const exportCSV = (data, filename) => {
     document.body.removeChild(link);
 };
 
+// [핵심 1] 연차 스마트 계산기: 입사일 기반 당해 연차 주기 확인 및 잔여일 계산 로직
 const calculateLeaveStats = (emp, records, baseDateStr) => {
     const baseDate = new Date(baseDateStr);
     const currentYear = baseDate.getFullYear();
     const stats = {};
     
-    // 입사일 기준 이번 연차 주기 시작일과 종료일 계산 (입사일 기준 최신 1년)
+    // 입사일 기준 이번 연차 주기 시작일과 종료일 계산 (가장 최신의 주기)
     let annivStart = new Date(baseDate);
     if (emp.joinDate) {
         const [jy, jm, jd] = emp.joinDate.split('-').map(Number);
@@ -136,7 +138,7 @@ const calculateLeaveStats = (emp, records, baseDateStr) => {
         const lType = r.leaveType || '연차';
         
         if (lType === '연차') {
-            // 연차는 현재 주기(최신 1년) 내의 것만 집계
+            // 연차는 입사일 기반 최근 1주기 내의 것만 집계 (오래된 사용/발생 내역은 무시)
             if (rDate >= annivStart && rDate < annivEnd) {
                 if (r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)) stats[lType].gen += r.days;
                 if (r.type === '사용' && !r.isCanceled) stats[lType].used += r.days;
@@ -206,6 +208,7 @@ export default function AnnualLeaveApp() {
                 if (d.companyName) setCompanyName(d.companyName);
                 if (d.leaveTypes) {
                     const types = d.leaveTypes;
+                    // 연차가 무조건 1순위로 오도록 고정
                     if (types.indexOf('연차') !== 0) {
                         const filtered = types.filter(t => t !== '연차');
                         setLeaveTypes(['연차', ...filtered]);
@@ -235,6 +238,7 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
+    // 매일 밤 12시: 만 4년이 경과한 데이터 자동 영구 삭제 기능
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0) return;
 
@@ -246,10 +250,11 @@ export default function AnnualLeaveApp() {
                 for (const rec of leaveRecords) {
                     if (!rec.date) continue;
                     const recDate = new Date(rec.date);
+                    // 현재 날짜 - 기록 날짜 계산
                     const diffTime = todayDate.getTime() - recDate.getTime();
                     const diffDays = diffTime / (1000 * 60 * 60 * 24);
                     
-                    if (diffDays >= 1460) { // 만 4년(365 * 4) 초과 시 삭제
+                    if (diffDays >= 1460) { // 만 4년(365 * 4 = 1460일) 초과 시 삭제
                         await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
                     }
                 }
@@ -273,8 +278,9 @@ export default function AnnualLeaveApp() {
         return () => clearTimeout(timerId);
     }, [isReady, leaveRecords]);
 
+    // 연차 자동 계산 및 유령 데이터 청소 로직
     useEffect(() => {
-        const syncAutoLeave = async () => {
+        const syncAutoLeaveAndCleanGhosts = async () => {
             if (!isReady || employees.length === 0) return;
             const todayStr = getTodayStr();
             const today = new Date(todayStr);
@@ -284,7 +290,24 @@ export default function AnnualLeaveApp() {
             for (const emp of employees) {
                 if (!emp.joinDate) continue;
                 const joinDateStr = emp.joinDate;
-                
+                const [jy, jm, jd] = joinDateStr.split('-').map(Number);
+                const joinD = new Date(jy, jm - 1, jd);
+
+                // --- 1단계: 유령 데이터 청소 (입사일 이전에 잘못 생성되었거나 기준과 맞지 않는 과거 데이터 싹 지우기) ---
+                try {
+                    const empAutoLeaves = leaveRecords.filter(r => r.empId === emp.empId && r.isAuto && r.type === '발생');
+                    for (const r of empAutoLeaves) {
+                        const recDate = new Date(r.date);
+                        // 기록 날짜가 2년 전보다 더 오래되었거나, 아예 입사일보다 빠른 잘못된 날짜라면 삭제
+                        if (recDate < twoYearsAgo || recDate < joinD) {
+                            await deleteDoc(doc(db, publicPath, 'leaveRecords', r.id));
+                        }
+                    }
+                } catch(e) {
+                    console.error("유령 데이터 청소 에러", e);
+                }
+
+                // --- 2단계: 최근 2년 내외 도래하는 연차만 자동 발생 ---
                 // 1년 미만 월차 발생 로직 (최근 2년 이내만)
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
@@ -313,8 +336,6 @@ export default function AnnualLeaveApp() {
                 }
 
                 // 1년 이상 연차 발생 로직 (최근 2년 이내만)
-                const [jy, jm, jd] = joinDateStr.split('-').map(Number);
-                const joinD = new Date(jy, jm - 1, jd);
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365.25);
                 
                 if (years >= 1) {
@@ -351,7 +372,7 @@ export default function AnnualLeaveApp() {
             }
         };
         
-        syncAutoLeave();
+        syncAutoLeaveAndCleanGhosts();
     }, [isReady, employees]);
 
     const dbUpdateSettings = async (key, value) => {
@@ -369,7 +390,7 @@ export default function AnnualLeaveApp() {
         <AppContext.Provider value={ctx}>
             <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
                 <style>{`
-                    /* Hide HTML5 Number Input Spinners */
+                    /* 숫자 스피너(화살표) 완벽하게 숨기기 (키보드 입력 전용) */
                     input[type="number"]::-webkit-outer-spin-button,
                     input[type="number"]::-webkit-inner-spin-button {
                         -webkit-appearance: none;
@@ -506,6 +527,7 @@ const PrintApplicationModal = ({ record, user, approvalLine, onClose }) => {
                         </tbody>
                     </table>
                     <div className="text-center text-lg mb-16">위와 같이 휴가를 신청하오니 허가하여 주시기 바랍니다.</div>
+                    {/* 신청일자를 출력하는 오늘 날짜로 변경 */}
                     <div className="text-center mb-8 text-lg font-bold">{getTodayStr()}</div>
                     <div className="flex justify-end items-end text-lg pr-12 mt-16">
                         <span className="mr-4">신청자 :</span>
@@ -775,7 +797,7 @@ function AdminView() {
     const [filterName, setFilterName] = useState('');
     const [summaryBaseDate, setSummaryBaseDate] = useState(getTodayStr());
     
-    const [proxyLeave, setProxyLeave] = useState({ leaveType: '연차', empId: '', date: '', days: 1, remark: '' });
+    const [proxyLeave, setProxyLeave] = useState({ leaveType: '연차', empId: '', date: '', days: '', remark: '' });
     const [delDate, setDelDate] = useState({ start: '', end: '' });
     
     const [printModal, setPrintModal] = useState(null);
@@ -815,7 +837,7 @@ function AdminView() {
 
     const handleProxySubmit = async (recordType) => {
         if (!proxyLeave.empId || !proxyLeave.date) return showToast('직원과 날짜를 선택하세요.', 'error');
-        if (proxyLeave.days <= 0) return showToast('일수는 0보다 커야 합니다.', 'error');
+        if (!proxyLeave.days || parseFloat(proxyLeave.days) <= 0) return showToast('일수는 0보다 커야 합니다.', 'error');
         
         const emp = employees.find(e => e.empId === proxyLeave.empId);
         if (!emp) return showToast('직원을 찾을 수 없습니다.', 'error');
@@ -823,7 +845,7 @@ function AdminView() {
         if (recordType === '사용') {
             const stats = calculateLeaveStats(emp, leaveRecords.filter(r => r.empId === emp.empId), proxyLeave.date);
             const currentRemain = stats[proxyLeave.leaveType]?.remain || 0;
-            if (currentRemain < proxyLeave.days) {
+            if (currentRemain < parseFloat(proxyLeave.days)) {
                 return showToast(`휴가 한도 초과! (${proxyLeave.leaveType} 잔여: ${currentRemain}일)`, 'error');
             }
         }
@@ -910,6 +932,7 @@ function AdminView() {
                                                 <tr key={`emp-${emp.empId}-${i}`} className="hover:bg-slate-50 transition-colors">
                                                     <td className="p-3">{emp.empId}</td><td className="p-3">{emp.dept}</td><td className="p-3 font-bold">{decryptedEmpName}</td><td className="p-3 text-slate-400">{emp.pw}</td><td className="p-3">{emp.joinDate}</td>
                                                     <td className="p-3 space-x-1 whitespace-nowrap">
+                                                        {/* 수정 버튼 삭제됨 */}
                                                         <button onClick={() => handleDeleteEmp(emp.empId)} className="text-xs bg-red-100 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-200">삭제</button>
                                                     </td>
                                                 </tr>
@@ -949,17 +972,18 @@ function AdminView() {
                             
                             <div className="flex items-center gap-3 text-sm border-b pb-3 border-slate-200 flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-slate-600 shrink-0">2. 등록 (대리)</span>
-                                <select className="border p-1.5 rounded w-24 bg-white" value={proxyLeave.leaveType} onChange={e=>setProxyLeave({...proxyLeave, leaveType:e.target.value})}>
+                                {/* 엔터 시 다음 필드로 포커스 이동 (id 활용) */}
+                                <select id="proxy-type" className="border p-1.5 rounded w-24 bg-white" value={proxyLeave.leaveType} onChange={e=>setProxyLeave({...proxyLeave, leaveType:e.target.value})} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('proxy-emp')?.focus();}}}>
                                     <option value="연차">연차</option>
                                     {leaveTypes.map(t=><option key={t} value={t}>{t}</option>)}
                                 </select>
-                                <select className="border p-1.5 rounded w-28 bg-white" value={proxyLeave.empId} onChange={e=>setProxyLeave({...proxyLeave, empId:e.target.value})}>
+                                <select id="proxy-emp" className="border p-1.5 rounded w-28 bg-white" value={proxyLeave.empId} onChange={e=>setProxyLeave({...proxyLeave, empId:e.target.value})} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('proxy-date')?.focus();}}}>
                                     <option value="">직원 선택</option>
                                     {employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}
                                 </select>
-                                <input type="date" className="border p-1.5 rounded bg-white" max="9999-12-31" value={proxyLeave.date} onChange={e=>setProxyLeave({...proxyLeave, date:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
-                                <input type="number" className="border p-1.5 rounded w-20 bg-white" value={proxyLeave.days} step="0.5" min="0" placeholder="일수" onChange={e=>setProxyLeave({...proxyLeave, days:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
-                                <input type="text" className="border p-1.5 rounded w-48 bg-white" placeholder="사유" value={proxyLeave.remark} onChange={e=>setProxyLeave({...proxyLeave, remark:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
+                                <input id="proxy-date" type="date" className="border p-1.5 rounded bg-white" max="9999-12-31" value={proxyLeave.date} onChange={e=>setProxyLeave({...proxyLeave, date:e.target.value})} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('proxy-days')?.focus();}}}/>
+                                <input id="proxy-days" type="number" step="0.5" min="0" className="border p-1.5 rounded w-20 bg-white" placeholder="일수" value={proxyLeave.days} onChange={e=>setProxyLeave({...proxyLeave, days:e.target.value})} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('proxy-remark')?.focus();}}}/>
+                                <input id="proxy-remark" type="text" className="border p-1.5 rounded w-48 bg-white" placeholder="사유" value={proxyLeave.remark} onChange={e=>setProxyLeave({...proxyLeave, remark:e.target.value})} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); handleProxySubmit('사용');}}}/>
                                 <button onClick={() => handleProxySubmit('사용')} className="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-indigo-700 shrink-0">휴가 사용 등록</button>
                                 <button onClick={() => handleProxySubmit('발생')} className="bg-blue-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-blue-700 shrink-0">휴가 부여 등록</button>
                             </div>
@@ -1072,7 +1096,7 @@ function UserView() {
     const { user, setUser, leaveTypes, leaveRecords, approvalLine, showToast, showConfirm, publicPath, db } = useContext(AppContext);
     const [applyLeaveType, setApplyLeaveType] = useState('연차');
     const [applyDate, setApplyDate] = useState('');
-    const [applyDays, setApplyDays] = useState(1);
+    const [applyDays, setApplyDays] = useState('');
     const [applyRemark, setApplyRemark] = useState('');
     const [printModal, setPrintModal] = useState(null);
 
@@ -1101,6 +1125,7 @@ function UserView() {
             });
             showToast('신청 완료'); 
             setApplyDate(''); 
+            setApplyDays('');
             setApplyRemark('');
         } catch(err) {
             showToast('신청 중 오류가 발생했습니다.', 'error');
@@ -1129,18 +1154,19 @@ function UserView() {
                     </div>
                     <form onSubmit={handleApply} className="bg-white p-6 rounded-xl shadow border">
                         <h2 className="font-bold text-lg mb-4 text-indigo-700">+ 휴가 신청</h2>
-                        {applyDate && <div className="text-sm bg-indigo-50 text-indigo-700 p-3 rounded mb-4 text-center font-bold">"{applyDate} 부터 {applyDays}일간" 신청합니다.</div>}
+                        {applyDate && <div className="text-sm bg-indigo-50 text-indigo-700 p-3 rounded mb-4 text-center font-bold">"{applyDate} 부터 {applyDays || 0}일간" 신청합니다.</div>}
                         <div className="space-y-4 text-sm">
+                            {/* 엔터 릴레이 기능 적용 (id 지정 및 다음 요소 포커스) */}
                             <div>
                                 <label className="block font-bold mb-1">휴가 종류</label>
-                                <select value={applyLeaveType} onChange={e => setApplyLeaveType(e.target.value)} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50">
+                                <select id="apply-type" value={applyLeaveType} onChange={e => setApplyLeaveType(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('apply-date')?.focus();}}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50">
                                     <option value="연차">연차</option>
                                     {leaveTypes.map(t => <option key={t} value={t}>{t}</option>)}
                                 </select>
                             </div>
-                            <div><label className="block font-bold mb-1">시작일</label><input required type="date" max="9999-12-31" value={applyDate} onChange={e => setApplyDate(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') handleApply(e);}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" /></div>
-                            <div><label className="block font-bold mb-1">사용 기간(일수)</label><input required type="number" step="0.5" min="0" value={applyDays} onChange={e => setApplyDays(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') handleApply(e);}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="예: 1 또는 0.5" /></div>
-                            <div><label className="block font-bold mb-1">사유/적요</label><input type="text" value={applyRemark} onChange={e => setApplyRemark(e.target.value)} onKeyDown={e=>{if(e.key==='Enter') handleApply(e);}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" /></div>
+                            <div><label className="block font-bold mb-1">시작일</label><input id="apply-date" required type="date" max="9999-12-31" value={applyDate} onChange={e => setApplyDate(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('apply-days')?.focus();}}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" /></div>
+                            <div><label className="block font-bold mb-1">사용 기간(일수)</label><input id="apply-days" required type="number" step="0.5" min="0" value={applyDays} onChange={e => setApplyDays(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); document.getElementById('apply-remark')?.focus();}}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="예: 1 또는 0.5" /></div>
+                            <div><label className="block font-bold mb-1">사유/적요</label><input id="apply-remark" type="text" value={applyRemark} onChange={e => setApplyRemark(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault(); handleApply(e);}}} className="w-full border p-3 rounded focus:border-indigo-500 outline-none bg-slate-50" placeholder="개인사정 등" /></div>
                             <button type="submit" className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold shadow hover:bg-indigo-700 transition">신청하기</button>
                         </div>
                     </form>

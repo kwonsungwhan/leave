@@ -22,7 +22,6 @@ const Icons = {
     Briefcase: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>,
     User: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>,
     LogOut: () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></svg>,
-    Settings: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>,
     Calendar: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>,
     List: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" x2="21" y1="6" y2="6" /><line x1="8" x2="21" y1="12" y2="12" /><line x1="8" x2="21" y1="18" y2="18" /><line x1="3" x2="3.01" y1="6" y2="6" /><line x1="3" x2="3.01" y1="12" y2="12" /><line x1="3" x2="3.01" y1="18" y2="18" /></svg>,
     Download: () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" x2="12" y1="15" y2="3" /></svg>,
@@ -110,10 +109,10 @@ const calculateLeaveStats = (emp, records, baseDateStr) => {
     const currentYear = baseDate.getFullYear();
     const stats = {};
     
-    // 입사일 기준 연차 주기 찾기 (입사일 기준 최신 1년)
+    // 입사일 기준 이번 연차 주기 시작일과 종료일 계산 (입사일 기준 최신 1년)
     let annivStart = new Date(baseDate);
     if (emp.joinDate) {
-        const [_, jm, jd] = emp.joinDate.split('-').map(Number);
+        const [jy, jm, jd] = emp.joinDate.split('-').map(Number);
         annivStart = new Date(currentYear, jm - 1, jd);
         if (annivStart > baseDate) {
             annivStart.setFullYear(currentYear - 1);
@@ -131,17 +130,19 @@ const calculateLeaveStats = (emp, records, baseDateStr) => {
     });
 
     records.forEach(r => {
-        if (new Date(r.date) > baseDate) return;
+        if (new Date(r.date) > baseDate) return; // 기준일 이후의 데이터 무시
         
         const rDate = new Date(r.date);
         const lType = r.leaveType || '연차';
         
         if (lType === '연차') {
+            // 연차는 현재 주기(최신 1년) 내의 것만 집계
             if (rDate >= annivStart && rDate < annivEnd) {
                 if (r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)) stats[lType].gen += r.days;
                 if (r.type === '사용' && !r.isCanceled) stats[lType].used += r.days;
             }
         } else {
+            // 기타 휴가는 해당 연도 1월 1일 기준 집계
             if (rDate.getFullYear() === currentYear) {
                  if (r.type === '발생' && !r.isCanceled) stats[lType].gen += r.days;
                  if (r.type === '사용' && !r.isCanceled) stats[lType].used += r.days;
@@ -245,7 +246,7 @@ export default function AnnualLeaveApp() {
                 for (const rec of leaveRecords) {
                     if (!rec.date) continue;
                     const recDate = new Date(rec.date);
-                    const diffTime = todayDate - recDate;
+                    const diffTime = todayDate.getTime() - recDate.getTime();
                     const diffDays = diffTime / (1000 * 60 * 60 * 24);
                     
                     if (diffDays >= 1460) { // 만 4년(365 * 4) 초과 시 삭제
@@ -353,34 +354,6 @@ export default function AnnualLeaveApp() {
         syncAutoLeave();
     }, [isReady, employees]);
 
-    useEffect(() => {
-        if (!isReady || employees.length === 0 || leaveRecords.length === 0) return;
-        
-        const cleanupGhostRecords = async () => {
-            const todayStr = getTodayStr();
-            const today = new Date(todayStr);
-            const twoYearsAgo = new Date(todayStr);
-            twoYearsAgo.setFullYear(today.getFullYear() - 2);
-
-            for (const emp of employees) {
-                if (!emp.joinDate) continue;
-                
-                const myAutoRecords = leaveRecords.filter(r => r.empId === emp.empId && r.isAuto);
-                
-                for (const rec of myAutoRecords) {
-                    const recDate = new Date(rec.date);
-                    // 2년보다 더 과거의 데이터이면서, "올해 연차 갱신주기"에 속하지 않는 데이터는 삭제
-                    if (recDate < twoYearsAgo) {
-                         // 삭제 유예 기간 검사 로직 (필요 시 정교화)
-                         await deleteDoc(doc(db, publicPath, 'leaveRecords', rec.id));
-                    }
-                }
-            }
-        };
-        
-        // cleanupGhostRecords(); // 활성화 시 과거 데이터 정리
-    }, [isReady, employees, leaveRecords]);
-
     const dbUpdateSettings = async (key, value) => {
         await updateDoc(doc(db, publicPath, 'settings', 'global'), { [key]: value });
     };
@@ -395,6 +368,17 @@ export default function AnnualLeaveApp() {
     return (
         <AppContext.Provider value={ctx}>
             <div className="min-h-screen bg-slate-50 font-sans text-slate-800">
+                <style>{`
+                    /* Hide HTML5 Number Input Spinners */
+                    input[type="number"]::-webkit-outer-spin-button,
+                    input[type="number"]::-webkit-inner-spin-button {
+                        -webkit-appearance: none;
+                        margin: 0;
+                    }
+                    input[type="number"] {
+                        -moz-appearance: textfield;
+                    }
+                `}</style>
                 <Toast message={toastMsg.text} type={toastMsg.type} />
                 <ConfirmDialog open={confirmState.open} message={confirmState.message} onConfirm={confirmState.onConfirm} onCancel={() => setConfirmState({...confirmState, open: false})} />
                 {!user ? <LoginView /> : user.role === 'admin' ? <AdminView /> : <UserView />}
@@ -908,7 +892,7 @@ function AdminView() {
                                 <div><label className="block font-bold mb-1">성명</label><input required type="text" value={empForm.name} onChange={e => setEmpForm({ ...empForm, name: e.target.value })} className="w-full border p-2 rounded" placeholder="본명 입력 (저장시 암호화)" /></div>
                                 <div><label className="block font-bold mb-1">초기 비밀번호 (직원 접속용)</label><input type="text" value={empForm.pw} onChange={e => setEmpForm({ ...empForm, pw: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 <div><label className="block font-bold mb-1">성별</label><div className="flex gap-4"><label><input type="radio" checked={empForm.gender === '남성'} onChange={() => setEmpForm({ ...empForm, gender: '남성' })} /> 남성</label><label><input type="radio" checked={empForm.gender === '여성'} onChange={() => setEmpForm({ ...empForm, gender: '여성' })} /> 여성</label></div></div>
-                                <div><label className="block font-bold mb-1">입사일 (연차 기준일)</label><input required type="date" value={empForm.joinDate} onChange={e => setEmpForm({ ...empForm, joinDate: e.target.value })} className="w-full border p-2 rounded" /></div>
+                                <div><label className="block font-bold mb-1">입사일 (연차 기준일)</label><input required type="date" max="9999-12-31" value={empForm.joinDate} onChange={e => setEmpForm({ ...empForm, joinDate: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 <div><label className="block font-bold mb-1">비고</label><input type="text" value={empForm.remark} onChange={e => setEmpForm({ ...empForm, remark: e.target.value })} className="w-full border p-2 rounded" /></div>
                                 <div className="pt-2">
                                     <button type="submit" className="w-full bg-indigo-600 text-white py-2.5 rounded font-bold hover:bg-indigo-700">등록하기</button>
@@ -952,7 +936,7 @@ function AdminView() {
                                     {employees.filter(e=>filterDept?e.dept===filterDept:true).map((e,i)=><option key={`filter-${e.empId}-${i}`} value={decryptName(e.realName)}>{decryptName(e.realName)}</option>)}
                                 </select>
                                 <span className="text-slate-400 text-xs shrink-0">기준일:</span>
-                                <input type="date" className="border p-1.5 rounded bg-white" value={summaryBaseDate} onChange={e => setSummaryBaseDate(e.target.value)} />
+                                <input type="date" className="border p-1.5 rounded bg-white" max="9999-12-31" value={summaryBaseDate} onChange={e => setSummaryBaseDate(e.target.value)} />
                                 <button onClick={() => {
                                     if(filterName) {
                                         const e = employees.find(x=>decryptName(x.realName)===filterName && (!filterDept||x.dept===filterDept));
@@ -973,11 +957,8 @@ function AdminView() {
                                     <option value="">직원 선택</option>
                                     {employees.map((e,i)=><option key={`proxy-${e.empId}-${i}`} value={e.empId}>{decryptName(e.realName)}</option>)}
                                 </select>
-                                <input type="date" className="border p-1.5 rounded bg-white" value={proxyLeave.date} onChange={e=>setProxyLeave({...proxyLeave, date:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
-                                <input type="number" list="days-list" className="border p-1.5 rounded w-20 bg-white" value={proxyLeave.days} step="0.5" max="25" min="0" onChange={e=>setProxyLeave({...proxyLeave, days:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
-                                <datalist id="days-list">
-                                    {[0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25].map(d=><option key={`dl-${d}`} value={d} />)}
-                                </datalist>
+                                <input type="date" className="border p-1.5 rounded bg-white" max="9999-12-31" value={proxyLeave.date} onChange={e=>setProxyLeave({...proxyLeave, date:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
+                                <input type="number" className="border p-1.5 rounded w-20 bg-white" value={proxyLeave.days} step="0.5" min="0" placeholder="일수" onChange={e=>setProxyLeave({...proxyLeave, days:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
                                 <input type="text" className="border p-1.5 rounded w-48 bg-white" placeholder="사유" value={proxyLeave.remark} onChange={e=>setProxyLeave({...proxyLeave, remark:e.target.value})} onKeyDown={e=>{if(e.key==='Enter') handleProxySubmit('사용');}}/>
                                 <button onClick={() => handleProxySubmit('사용')} className="bg-indigo-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-indigo-700 shrink-0">휴가 사용 등록</button>
                                 <button onClick={() => handleProxySubmit('발생')} className="bg-blue-600 text-white px-4 py-1.5 rounded font-bold shadow-sm hover:bg-blue-700 shrink-0">휴가 부여 등록</button>
@@ -985,8 +966,8 @@ function AdminView() {
 
                             <div className="flex items-center gap-3 text-sm text-red-600 flex-nowrap overflow-x-auto whitespace-nowrap">
                                 <span className="font-bold text-red-700 shrink-0">3. 삭제 (일괄)</span>
-                                <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.start} onChange={e=>setDelDate({...delDate, start:e.target.value})}/> ~ 
-                                <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" value={delDate.end} onChange={e=>setDelDate({...delDate, end:e.target.value})}/>
+                                <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" max="9999-12-31" value={delDate.start} onChange={e=>setDelDate({...delDate, start:e.target.value})}/> ~ 
+                                <input type="date" className="border p-1.5 rounded text-slate-800 bg-white" max="9999-12-31" value={delDate.end} onChange={e=>setDelDate({...delDate, end:e.target.value})}/>
                                 <button onClick={handleBulkDelete} className="bg-red-600 text-white px-3 md:px-4 py-1.5 rounded shadow-sm font-bold hover:bg-red-700 shrink-0">일괄 영구삭제</button>
                                 <span className="text-xs font-normal text-slate-500 shrink-0">(지정 기간 내 '발생' 데이터만 삭제)</span>
                             </div>

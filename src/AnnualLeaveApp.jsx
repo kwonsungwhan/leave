@@ -1195,16 +1195,6 @@ function UserView() {
                                         <td className={`p-3 min-w-[150px] ${r.isCanceled||(r.isAuto&&!r.isFulfilled)?'line-through text-red-500':''}`}>{r.remark}{r.history&&<div className="text-[10px] text-slate-400 mt-1">{r.history}</div>}</td>
                                         <td className="p-3 text-center space-y-1 whitespace-nowrap">
                                             {r.type==='사용' && <button onClick={()=>setPrintModal(r)} className="w-full block text-xs border border-indigo-200 text-indigo-600 bg-indigo-50 px-2 py-1.5 rounded mb-1 font-bold hover:bg-indigo-100">신청서</button>}
-                                            {!r.isAuto && r.type==='사용' && !r.isCanceled && (
-                                                <button onClick={()=>{
-                                                    showConfirm('신청을 취소하시겠습니까?', async () => {
-                                                        try {
-                                                            await updateDoc(doc(db, publicPath, 'leaveRecords', r.id), { isCanceled: true, history: (r.history||'') + ` [${getTodayStr()} 본인취소]` });
-                                                            showToast('취소됨');
-                                                        } catch(err) { showToast('오류 발생', 'error'); }
-                                                    });
-                                                }} className="w-full block text-xs border border-red-200 text-red-600 px-2 py-1.5 rounded font-bold hover:bg-red-50">삭제(취소)</button>
-                                            )}
                                         </td>
                                     </tr>
                                 ))}

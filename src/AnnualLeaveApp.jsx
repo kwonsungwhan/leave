@@ -618,8 +618,27 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     if (!allEmployees) return null;
 
     const calculateAnnualStatus = (emp) => {
-        const stats = calculateLeaveStats(emp, records.filter(r => r.empId === emp.empId), getTodayStr());
-        return stats['연차'] || { gen: 0, used: 0, remain: 0 };
+        const myR = records.filter(r => r.empId === emp.empId && r.leaveType === '연차');
+        // 입사일 기반 스마트 계산
+        let y=new Date().getFullYear(), m=1, d=1;
+        if (emp.joinDate) {
+            const parts = emp.joinDate.split('-');
+            y = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10);
+            d = parseInt(parts[2], 10);
+        }
+        const joinDate = new Date(y, m - 1, d);
+        const today = new Date();
+        
+        // 이번 주기의 시작일 계산
+        let currentCycleStart = new Date(today.getFullYear(), m - 1, d);
+        if (currentCycleStart > today) {
+            currentCycleStart.setFullYear(today.getFullYear() - 1);
+        }
+
+        const gen = myR.filter(r => r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled) && new Date(r.date) >= currentCycleStart).reduce((acc, r) => acc + r.days, 0);
+        const used = myR.filter(r => r.type === '사용' && !r.isCanceled && new Date(r.date) >= currentCycleStart).reduce((acc, r) => acc + r.days, 0);
+        return { gen, used, remain: gen - used, currentCycleStart };
     };
 
     const getWarnings = (emp) => {
@@ -643,6 +662,15 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
     }
 
     const decryptedSelectedName = selectedEmp ? decryptName(selectedEmp.realName) : "";
+    const selectedEmpStats = selectedEmp ? calculateAnnualStatus(selectedEmp) : { gen: 0, used: 0, remain: 0, currentCycleStart: new Date() };
+    
+    // 소멸 예정일(사용 기한) 계산: 주기 시작일 + 1년 - 1일
+    const expirationDate = new Date(selectedEmpStats.currentCycleStart);
+    expirationDate.setFullYear(expirationDate.getFullYear() + 1);
+    expirationDate.setDate(expirationDate.getDate() - 1);
+    const expirationDateStr = `${expirationDate.getFullYear()}-${String(expirationDate.getMonth()+1).padStart(2,'0')}-${String(expirationDate.getDate()).padStart(2,'0')}`;
+    const cycleStartStr = `${selectedEmpStats.currentCycleStart.getFullYear()}-${String(selectedEmpStats.currentCycleStart.getMonth()+1).padStart(2,'0')}-${String(selectedEmpStats.currentCycleStart.getDate()).padStart(2,'0')}`;
+
 
     return (
         <div className="fixed inset-0 bg-slate-200/60 flex items-center justify-center z-[100] p-4">
@@ -690,18 +718,39 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{decryptedSelectedName}</td></tr>
-                                                    <tr><th className="border border-black bg-slate-100 p-2">총 발생일수</th><td className="border border-black p-2">{calculateAnnualStatus(selectedEmp).gen}일</td><th className="border border-black bg-slate-100 p-2">사용일수</th><td className="border border-black p-2">{calculateAnnualStatus(selectedEmp).used}일</td></tr>
-                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{calculateAnnualStatus(selectedEmp).remain}일</td></tr>
+                                                    <tr>
+                                                        <th className="border border-black bg-slate-100 p-2 w-1/5">부서</th>
+                                                        <td className="border border-black p-2 w-1/5">{selectedEmp.dept}</td>
+                                                        <th className="border border-black bg-slate-100 p-2 w-1/5">성명</th>
+                                                        <td className="border border-black p-2 w-1/5 font-bold">{decryptedSelectedName}</td>
+                                                        <th className="border border-black bg-slate-100 p-2 w-1/5">입사일자</th>
+                                                        <td className="border border-black p-2 w-1/5">{selectedEmp.joinDate}</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <th colSpan="2" className="border border-black bg-slate-100 p-2">총 발생일수</th>
+                                                        <td colSpan="2" className="border border-black p-2">{selectedEmpStats.gen}일</td>
+                                                        <th className="border border-black bg-slate-100 p-2">사용일수</th>
+                                                        <td className="border border-black p-2">{selectedEmpStats.used}일</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <th colSpan="3" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th>
+                                                        <td colSpan="3" className="border border-black p-2 font-bold text-lg text-red-600">{selectedEmpStats.remain}일</td>
+                                                    </tr>
                                                 </tbody>
                                             </table>
                                             <p className="leading-relaxed">
                                                 「근로기준법 제61조」에 의거하여, 귀하의 미사용 연차 유급휴가 일수를 위와 같이 통지하오니, 
                                                 본 통지서를 수령한 날로부터 <strong>10일 이내</strong>에 미사용 연차 유급휴가의 사용 시기를 정하여 회사에 서면으로 통보하여 주시기 바랍니다.
                                             </p>
+                                            <div className="bg-slate-50 p-4 border border-slate-300 rounded mb-4">
+                                                <ul className="list-disc list-inside space-y-1 font-bold">
+                                                    <li>해당 연차 사용 가능 기간 : {cycleStartStr} ~ {expirationDateStr}</li>
+                                                    <li className="text-red-600">미사용 연차 소멸 예정일 : {expirationDateStr} (이후 사용 불가)</li>
+                                                </ul>
+                                            </div>
                                             <p className="leading-relaxed">
                                                 만약, 10일 이내에 사용 시기를 통보하지 않을 경우 회사가 귀하의 휴가 사용 시기를 임의로 지정하여 통보할 수 있으며, 
-                                                그럼에도 불구하고 휴가를 사용하지 않아 소멸된 연차 휴가에 대해서는 <strong>금전적 보상의무가 면제됨</strong>을 알려드립니다.
+                                                그럼에도 불구하고 지정된 휴가일에 출근하여 휴가를 사용하지 않아 소멸된 연차 휴가에 대해서는 <strong>금전적 보상의무가 면제됨</strong>을 알려드립니다.
                                             </p>
                                             <div className="text-center mt-8 font-bold text-lg">{getTodayStr()}</div>
                                             <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
@@ -729,8 +778,16 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6">
                                                 <tbody>
-                                                    <tr><th className="border border-black bg-slate-100 p-2 w-1/4">부서</th><td className="border border-black p-2">{selectedEmp.dept}</td><th className="border border-black bg-slate-100 p-2 w-1/4">성명</th><td className="border border-black p-2 font-bold">{decryptedSelectedName}</td></tr>
-                                                    <tr><th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th><td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{calculateAnnualStatus(selectedEmp).remain}일</td></tr>
+                                                    <tr>
+                                                        <th className="border border-black bg-slate-100 p-2 w-1/4">부서</th>
+                                                        <td className="border border-black p-2">{selectedEmp.dept}</td>
+                                                        <th className="border border-black bg-slate-100 p-2 w-1/4">성명</th>
+                                                        <td className="border border-black p-2 font-bold">{decryptedSelectedName}</td>
+                                                    </tr>
+                                                    <tr>
+                                                        <th colSpan="2" className="border border-black bg-slate-100 p-2 font-bold text-lg">미사용 연차 휴가일수</th>
+                                                        <td colSpan="2" className="border border-black p-2 font-bold text-lg text-red-600">{selectedEmpStats.remain}일</td>
+                                                    </tr>
                                                 </tbody>
                                             </table>
                                             <p className="leading-relaxed">
@@ -739,6 +796,30 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                             <p className="leading-relaxed">
                                                 이에 따라, 회사는 동일 법령에 의거하여 귀하의 미사용 연차 유급휴가의 <strong>사용 시기를 아래와 같이 지정하여 통보</strong>합니다.
                                             </p>
+                                            
+                                            {/* 사용시기 지정 표 추가 */}
+                                            <div className="my-6">
+                                                <h4 className="font-bold mb-2">[회사 지정 연차 사용일]</h4>
+                                                <table className="w-full border-collapse border border-black text-center">
+                                                    <thead>
+                                                        <tr>
+                                                            <th className="border border-black bg-slate-100 p-2 w-1/2">지정일자 (년 월 일)</th>
+                                                            <th className="border border-black bg-slate-100 p-2 w-1/4">일수</th>
+                                                            <th className="border border-black bg-slate-100 p-2 w-1/4">비고</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        <tr><td className="border border-black p-4"></td><td className="border border-black p-4"></td><td className="border border-black p-4"></td></tr>
+                                                        <tr><td className="border border-black p-4"></td><td className="border border-black p-4"></td><td className="border border-black p-4"></td></tr>
+                                                        <tr><td className="border border-black p-4"></td><td className="border border-black p-4"></td><td className="border border-black p-4"></td></tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+
+                                            <p className="leading-relaxed text-red-600 font-bold">
+                                                ※ 주의: 지정된 사용일에는 근로 제공 의무가 없으며, 해당일에 출근하여 노무를 제공하더라도 회사는 이를 수령 거부하며, 미사용 연차에 대한 수당은 지급되지 않습니다.
+                                            </p>
+
                                             <div className="text-center mt-8 font-bold text-lg">{getTodayStr()}</div>
                                             <div className="text-right mt-6 text-xl font-black mb-8">{companyName} <span className="text-base font-normal text-slate-700">(인)</span></div>
 

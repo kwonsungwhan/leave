@@ -111,7 +111,6 @@ const calculateLeaveStats = (emp, records, baseDateStr) => {
     const currentYear = baseDate.getFullYear();
     const stats = {};
     
-    // 입사일 기준 '기준일(baseDate)'이 속한 연차 주기의 시작일과 종료일 계산
     let annivStart = new Date(baseDate);
     if (emp.joinDate) {
         const [jy, jm, jd] = emp.joinDate.split('-').map(Number);
@@ -138,13 +137,11 @@ const calculateLeaveStats = (emp, records, baseDateStr) => {
         const lType = r.leaveType || '연차';
         
         if (lType === '연차') {
-            // 연차: 입사일 기반 최근 1주기(annivStart ~ annivEnd) 내의 기록만 집계
             if (rDate >= annivStart && rDate < annivEnd) {
                 if (r.type === '발생' && !r.isCanceled && (!r.isAuto || r.isFulfilled)) stats[lType].gen += r.days;
                 if (r.type === '사용' && !r.isCanceled) stats[lType].used += r.days;
             }
         } else {
-            // 기타 휴가: 기준일이 속한 '해당 연도 1월 1일'부터 집계
             if (rDate.getFullYear() === currentYear) {
                  if (r.type === '발생' && !r.isCanceled) stats[lType].gen += r.days;
                  if (r.type === '사용' && !r.isCanceled) stats[lType].used += r.days;
@@ -237,7 +234,7 @@ export default function AnnualLeaveApp() {
         return () => { unsubSettings(); unsubEmps(); unsubRecords(); };
     }, [isReady]);
 
-    // 1. 매일 밤 12시: 만 4년이 경과한 데이터 자동 영구 삭제 (정밀 시간 계산)
+    // 매일 밤 12시: 만 4년이 경과한 데이터 자동 영구 삭제
     useEffect(() => {
         if (!isReady || leaveRecords.length === 0) return;
 
@@ -276,7 +273,7 @@ export default function AnnualLeaveApp() {
         return () => clearTimeout(timerId);
     }, [isReady, leaveRecords]);
 
-    // 2. 유령 데이터 청소 및 최근 2년 + 도래 시 연차 자동 발생 로직
+    // 유령 데이터 청소 및 최근 2년 + 도래 시 연차 자동 발생 로직
     useEffect(() => {
         const syncAutoLeaveAndCleanGhosts = async () => {
             if (!isReady || employees.length === 0) return;
@@ -291,7 +288,6 @@ export default function AnnualLeaveApp() {
                 const [jy, jm, jd] = joinDateStr.split('-').map(Number);
                 const joinD = new Date(jy, jm - 1, jd);
 
-                // 유령 데이터(현재 설정된 입사일 기준에 맞지 않거나 2년보다 더 오래된 기록) 청소
                 try {
                     const empAutoLeaves = leaveRecords.filter(r => r.empId === emp.empId && r.isAuto && r.type === '발생');
                     for (const r of empAutoLeaves) {
@@ -302,7 +298,6 @@ export default function AnnualLeaveApp() {
                     }
                 } catch(e) { console.error("유령 데이터 청소 에러", e); }
 
-                // 1년 미만 월차 발생 (최근 2년 이내 & 오늘 이전)
                 for (let m = 1; m <= 11; m++) {
                     const targetDateStr = addMonthsExact(joinDateStr, m);
                     const targetDate = new Date(targetDateStr);
@@ -325,7 +320,6 @@ export default function AnnualLeaveApp() {
                     }
                 }
 
-                // 1년 이상 연차 발생 (최근 2년 이내 & 오늘 이전)
                 const years = (today - joinD) / (1000 * 60 * 60 * 24 * 365.25);
                 
                 if (years >= 1) {
@@ -820,7 +814,6 @@ function AdminView() {
     const [newPw, setNewPw] = useState('');
     const [newCompany, setNewCompany] = useState('');
 
-    // 인쇄 모달이 하나라도 열려있으면 배경화면 숨김 처리 위함
     const isPrinting = printModal || summaryModal || promoModalOpen;
 
     const handleEmpSubmit = async (e) => {
@@ -1225,4 +1218,3 @@ function UserView() {
         </div>
     );
 }
-```eof

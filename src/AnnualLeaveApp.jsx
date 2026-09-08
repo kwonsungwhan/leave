@@ -653,7 +653,9 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                     <button onClick={() => window.print()} className="bg-slate-800 text-white px-4 py-1.5 rounded font-bold flex items-center gap-2 text-sm"><Icons.Download /> 인쇄</button>
                                 </div>
                                 <div className="flex-1 p-12 overflow-auto print:block print:p-0 print:overflow-visible print:h-auto">
-                                    {docType === '촉구서' ? (
+                                    
+                                    {/* --- 1. 사용 촉구서 렌더링 영역 --- */}
+                                    {docType === '촉구서' && (
                                         <div className="space-y-6 text-base flex flex-col h-full print:block print:h-auto">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용 촉구서</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6 print:break-inside-avoid">
@@ -713,7 +715,10 @@ const PrintPromotionModal = ({ allEmployees, records, onClose }) => {
                                                 </div>
                                             </div>
                                         </div>
-                                    ) : (
+                                    )}
+
+                                    {/* --- 2. 지정 통지문 렌더링 영역 --- */}
+                                    {docType === '지정통지문' && (
                                         <div className="space-y-6 text-base flex flex-col h-full print:block print:h-auto">
                                             <h1 className="text-3xl font-black text-center mb-8 decoration-4 underline underline-offset-8">연차 유급휴가 사용시기 지정 통지문</h1>
                                             <table className="w-full border-collapse border border-black text-center mb-6 print:break-inside-avoid">
